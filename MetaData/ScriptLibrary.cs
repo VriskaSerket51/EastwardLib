@@ -8,25 +8,19 @@ public class ScriptLibrary : Dictionary<string, string>
     {
     }
 
-    public static ScriptLibrary Create(string path)
+
+    public static ScriptLibrary Create(string json)
     {
-        if (!File.Exists(path))
-        {
-            throw new FileNotFoundException();
-        }
-
-
-        string json = File.ReadAllText(path);
         var root = JSONNode.Parse(json);
         ScriptLibrary scriptLibrary = new ScriptLibrary(root.Count);
 
         var exportNode = root["export"];
         var sourceNode = root["source"];
 
-        foreach (var (key, value) in exportNode)
+        foreach (var (key, value) in sourceNode)
         {
-            string src = sourceNode[key].Value;
-            scriptLibrary[src] = value.Value;
+            string export = exportNode[key].Value;
+            scriptLibrary[value.Value] = export;
         }
 
         return scriptLibrary;
