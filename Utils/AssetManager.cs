@@ -1,16 +1,20 @@
 ﻿using EastwardLib.Assets;
 using EastwardLib.Exceptions;
+using EastwardLib.Fmod;
 using EastwardLib.MetaData;
 
-namespace EastwardLib;
+namespace EastwardLib.Utils;
 
 public class AssetManager
 {
     private readonly AssetIndex _assetIndex;
     private readonly ScriptLibrary _scriptLibrary;
     private TextureIndex _textureIndex;
+    private FmodProject? _fmodProject;
     private readonly Dictionary<string, GArchive> _archives = new();
     private readonly Dictionary<string, Asset> _assets = new();
+
+    public string RootDirectory { get; set; } = string.Empty;
 
     public AssetManager(AssetIndex assetIndex, ScriptLibrary scriptLibrary, TextureIndex textureIndex)
     {
@@ -183,6 +187,7 @@ public class AssetManager
                     return new PackageAsset(deckAssets);
 
                 case "font_ttf":
+                    return Asset.Create<BinaryAsset>(LoadFile(objectFiles["font"]));
                 case "font_bmfont":
                     return Asset.Create<TextAsset>(LoadFile(objectFiles["font"]));
                 case "shader_script":
@@ -206,9 +211,11 @@ public class AssetManager
 
                     return Asset.Create<HmgAsset>(LoadFile(objectFiles["pixmap"]));
                 case "fs_project":
+                    _fmodProject = new FmodProject();
+                    return null;
                 case "fs_event":
+                    return null;
                 case "fs_folder":
-                    // TODO Audio Handling
                     return null;
                 case "lua":
                     // TODO Implement lua
@@ -294,9 +301,9 @@ public class AssetManager
                     {
                         var fileName = GetChildName(meshFiles[i]);
                         var data = meshPackage[i];
-                        if (fileName.EndsWith(".hmg"))
+                        if (fileName.EndsWith(".png"))
                         {
-                            meshAssets.Add(fileName, Asset.Create<HmgAsset>(data));
+                            meshAssets.Add(fileName, Asset.Create<BinaryAsset>(data));
                         }
                         else
                         {
@@ -329,6 +336,15 @@ public class AssetManager
         var archiveName = split[0];
         if (!_archives.ContainsKey(archiveName))
         {
+            if (!string.IsNullOrEmpty(RootDirectory))
+            {
+                string realPath = Path.Combine(RootDirectory, virtualPath);
+                if (File.Exists(realPath))
+                {
+                    return File.ReadAllBytes(realPath);
+                }
+            }
+
             throw new ArchiveNotFoundException($"Archive name with {archiveName} Not Loaded!!!");
         }
 
@@ -341,6 +357,22 @@ public class AssetManager
         var archiveName = split[0];
         if (!_archives.ContainsKey(archiveName))
         {
+            if (!string.IsNullOrEmpty(RootDirectory))
+            {
+                string realPath = Path.Combine(RootDirectory, virtualPath);
+                if (Directory.Exists(realPath))
+                {
+                    var files = Directory.GetFiles(realPath, "*.*", SearchOption.AllDirectories);
+                    var result = new List<byte[]>(files.Length);
+                    foreach (var file in files)
+                    {
+                        result.Add(File.ReadAllBytes(file));
+                    }
+
+                    return result;
+                }
+            }
+
             throw new ArchiveNotFoundException($"Archive name with {archiveName} Not Loaded!!!");
         }
 
@@ -376,7 +408,7 @@ public class AssetManager
 
         return results;
     }
-    
+
     private string GetChildName(string objectPath)
     {
         var split = objectPath.Split('/');

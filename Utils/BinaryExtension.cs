@@ -1,10 +1,10 @@
 ﻿using System.Text;
 
-namespace EastwardLib;
+namespace EastwardLib.Utils;
 
 public static class BinaryExtension
 {
-    public static string ReadNullTerminatedString(this BinaryReader br)
+    public static string ReadZString(this BinaryReader br)
     {
         StringBuilder sb = new StringBuilder(10);
         char c;
@@ -16,7 +16,7 @@ public static class BinaryExtension
         return sb.ToString();
     }
     
-    public static void WriteNullTerminatedString(this BinaryWriter bw, string s)
+    public static void WriteZString(this BinaryWriter bw, string s)
     {
         foreach (var c in s.ToCharArray())
         {
