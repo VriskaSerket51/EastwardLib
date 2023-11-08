@@ -6,8 +6,9 @@ For example,
 using EastwardLib;
 using EastwardLib.MetaData;
 
-AssetIndex.Create("asset_index");
 var g = GArchive.Read("locale.g");
 g["foo"] = new TextAsset("bar");
 g.Write("locale_new.g");
 ```
+
+Currently, you cannot export lua, audio and some textures.
