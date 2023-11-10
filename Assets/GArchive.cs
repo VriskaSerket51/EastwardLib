@@ -3,7 +3,7 @@ using ZstdSharp;
 
 namespace EastwardLib.Assets;
 
-public class GArchive : Dictionary<string, byte[]>, IDisposable
+public class GArchive : Dictionary<string, byte[]>
 {
     private const int MagicHeader = 27191;
 
@@ -131,10 +131,5 @@ public class GArchive : Dictionary<string, byte[]>, IDisposable
 
             File.WriteAllBytes(outputPath, data);
         }
-    }
-
-    public void Dispose()
-    {
-        Clear();
     }
 }
