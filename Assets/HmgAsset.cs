@@ -89,19 +89,15 @@ public class HmgAsset : Asset
         int compressedSize = br.ReadInt32();
         _width = br.ReadInt32();
         _height = br.ReadInt32();
-        int bpp = br.ReadByte();
-        if (bpp != 32)
-        {
-            throw new Exception();
-        }
+        br.ReadByte(); // Fixed to 32, may means RGBA8888
 
-        br.ReadByte(); // Fixed to 1
+        br.ReadByte(); // Fixed to 1, may means TRUE_TYPE
         dummyLen = br.ReadByte();
-        br.ReadByte(); // Compression type, 0 is lz4
+        br.ReadByte(); // Maybe Compression type, 0 is lz4
         br.ReadBytes(dummyLen); // Another Dummy Chunk
 
         byte[] compressedData = br.ReadBytes(compressedSize);
-        _bitmapData = new byte[_width * _height * bpp / 8];
+        _bitmapData = new byte[_width * _height * 4];
         LZ4Codec.Decode(compressedData, _bitmapData);
     }
 
@@ -124,14 +120,12 @@ public class HmgAsset : Asset
         return result;
     }
 
-    public override void SaveTo(string path)
+    public void SaveTo(Stream s)
     {
         if (_bitmapData == null)
         {
             return;
         }
-
-        PrepareDirectory(path);
 
         byte[] bmpData = new byte[_bitmapData.Length];
         for (var i = 0; i < _bitmapData.Length; i += 4)
@@ -146,16 +140,26 @@ public class HmgAsset : Asset
             bmpData[i + 3] = a;
         }
 
-        int bpp = 32;
-
         unsafe
         {
             fixed (byte* ptr = bmpData)
             {
-                using Bitmap image = new Bitmap(_width, _height, _width * bpp / 8, PixelFormat.Format32bppArgb,
+                using Bitmap image = new Bitmap(_width, _height, _width * 4, PixelFormat.Format32bppArgb,
                     new IntPtr(ptr));
-                image.Save(path, ImageFormat.Png);
+                image.Save(s, ImageFormat.Png);
             }
         }
+    }
+
+    public override void SaveTo(string path)
+    {
+        if (_bitmapData == null)
+        {
+            return;
+        }
+
+        PrepareDirectory(path);
+
+        SaveTo(File.OpenWrite(path));
     }
 }
