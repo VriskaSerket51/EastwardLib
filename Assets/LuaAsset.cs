@@ -9,11 +9,16 @@ public class LuaAsset : Asset
 
     public override byte[] Encode()
     {
-        return base.Encode();
+        throw new NotImplementedException();
     }
 
     public override void Decode(Stream s)
     {
-        base.Decode(s);
+        throw new NotImplementedException();
+    }
+
+    public override void SaveTo(string path)
+    {
+        throw new NotImplementedException();
     }
 }
