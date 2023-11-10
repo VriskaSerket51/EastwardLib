@@ -1,6 +1,5 @@
 ﻿namespace EastwardLib.Assets;
 
-// TODO implement this
 public class LuaAsset : Asset
 {
     public LuaAsset()
