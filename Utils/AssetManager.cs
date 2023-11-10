@@ -9,7 +9,8 @@ public class AssetManager
 {
     private readonly AssetIndex _assetIndex;
     private readonly ScriptLibrary _scriptLibrary;
-    private TextureIndex _textureIndex;
+    private readonly TextureIndex _textureIndex;
+    private readonly Dictionary<string, AtlasAsset> _atlasAssets = new();
     private FmodProject? _fmodProject;
     private readonly Dictionary<string, GArchive> _archives = new();
     private readonly Dictionary<string, Asset> _assets = new();
@@ -74,16 +75,26 @@ public class AssetManager
         }
     }
 
-    // public static AssetManager Create(string path)
-    // {
-    //     if (!File.Exists(path))
-    //     {
-    //         throw new FileNotFoundException(path);
-    //     }
-    //
-    //     var config = GArchive.Read(path);
-    //     config["config/asset_index"];
-    // }
+    public static AssetManager Create(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException(path);
+        }
+
+        var config = GArchive.Read(path);
+
+        var assetIndexAsset = Asset.Create<TextAsset>(config["config/asset_index"]);
+        var assetIndex = AssetIndex.Create(assetIndexAsset.Text);
+
+        var scriptLibraryAsset = Asset.Create<TextAsset>(config["config/script_library"]);
+        var scriptLibrary = ScriptLibrary.Create(scriptLibraryAsset.Text);
+
+        var textureIndexAsset = Asset.Create<TextAsset>(config["config/texture_index"]);
+        var textureIndex = TextureIndex.Create(textureIndexAsset.Text);
+
+        return new AssetManager(assetIndex, scriptLibrary, textureIndex);
+    }
 
     public void LoadArchive(GArchive archive)
     {
@@ -93,6 +104,11 @@ public class AssetManager
     public void UnloadArchive(string archiveName)
     {
         _archives.Remove(archiveName);
+    }
+
+    public void UnloadArchives()
+    {
+        _archives.Clear();
     }
 
     public void LoadAssets()
@@ -197,15 +213,43 @@ public class AssetManager
                 case "texture":
                     if (objectFiles.Count == 0)
                     {
-                        // TODO TextureIndex
-                        return null;
+                        if (!_textureIndex.TryGetValue(assetName, out var atlasPath))
+                        {
+                            return null;
+                        }
+
+                        if (!_atlasAssets.TryGetValue(atlasPath, out var atlasAsset))
+                        {
+                            var atlasPackage = LoadDirectory(atlasPath);
+                            var atlasFiles = GetFiles(atlasPath);
+                            var atlasAssets = new Dictionary<string, Asset>(atlasPackage.Count);
+                            for (var i = 0; i < atlasPackage.Count; i++)
+                            {
+                                var fileName = GetChildName(atlasFiles[i]);
+                                var data = atlasPackage[i];
+                                if (fileName.EndsWith(".json"))
+                                {
+                                    atlasAssets.Add(fileName, Asset.Create<TextAsset>(data));
+                                }
+                                else
+                                {
+                                    atlasAssets.Add(fileName, Asset.Create<HmgAsset>(data));
+                                }
+                            }
+
+                            atlasAsset = new AtlasAsset(atlasAssets);
+                            _atlasAssets.Add(atlasPath, atlasAsset);
+                        }
+
+                        return Asset.Create<BinaryAsset>(atlasAsset[assetName]);
                     }
 
                     if (fileType == "v" && assetName.EndsWith("_texture"))
                     {
-                        PackageAsset parent =
-                            (PackageAsset)_assets[Path.GetDirectoryName(assetName)!.Replace('\\', '/')];
-                        parent.AddChild("atlas", Asset.Create<HmgAsset>(LoadFile(objectFiles["pixmap"])));
+                        string parentName = Path.GetDirectoryName(assetName)!.Replace('\\', '/');
+                        PackageAsset? parent = (PackageAsset?)LoadAsset(parentName);
+
+                        parent?.AddChild("atlas", Asset.Create<HmgAsset>(LoadFile(objectFiles["pixmap"])));
                         return null;
                     }
 
@@ -328,6 +372,107 @@ public class AssetManager
         }
 
         return null;
+    }
+
+    public void UnloadAsset(string assetName)
+    {
+        _assets.Remove(assetName);
+    }
+
+    public void UnloadAssets()
+    {
+        _assets.Clear();
+    }
+
+    public FileTree GetIndex()
+    {
+        FileTree index = new FileTree();
+        foreach (var (assetName, assetInfo) in _assetIndex)
+        {
+            var type = assetInfo.Type;
+            var objectFiles = assetInfo.ObjectFiles;
+            var fileType = assetInfo.FileType;
+            switch (type)
+            {
+                case "folder":
+                case "file":
+                case "deck2d.mquad":
+                case "deck2d.mtileset":
+                case "deck2d.quad":
+                case "deck2d.quads":
+                case "deck2d.stretchpatch":
+                case "deck2d.tileset":
+                case "deck2d.quad_array":
+                case "texture_pack":
+                case "texture_processor":
+                case "named_tileset":
+                case "fs_project":
+                case "fs_event":
+                case "fs_folder":
+                    continue;
+                case "named_tileset_pack":
+                case "deck_pack_raw":
+                case "deck_pack":
+                case "font_ttf":
+                case "font_bmfont":
+                case "shader_script":
+                case "glsl":
+                case "lua":
+                case "data_json":
+                case "data_csv":
+                case "data_xls":
+                case "animator_data":
+                case "text":
+                case "code_tileset":
+                case "asset_map":
+                case "multi_texture":
+                case "tb_scheme":
+                case "locale_pack":
+                case "raw":
+                case "movie":
+                case "sq_script":
+                case "msprite":
+                case "proto":
+                case "effect":
+                case "fsm_scheme":
+                case "bt_script":
+                case "material":
+                case "physics_body_def":
+                case "physics_material":
+                case "scene_portal_graph":
+                case "quest_scheme":
+                case "stylesheet":
+                case "prefab":
+                case "story_graph":
+                case "render_target":
+                case "ui_style":
+                case "deck2d":
+                case "scene":
+                case "mesh":
+                case "com_script":
+                case "lut_texture":
+                    index.AppendFileName(assetName);
+                    break;
+                case "texture":
+                    if (objectFiles.Count == 0)
+                    {
+                        if (!_textureIndex.TryGetValue(assetName, out var atlasPath))
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (fileType == "v" && assetName.EndsWith("_texture"))
+                    {
+                        continue;
+                    }
+
+                    index.AppendFileName(assetName);
+                    break;
+            }
+        }
+
+        return index;
     }
 
     private byte[] LoadFile(string virtualPath)
