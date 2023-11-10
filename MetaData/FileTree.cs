@@ -74,11 +74,6 @@ public class FileTree
     private static void ToStringHelper(StringBuilder sb, int indent, Node node, int depth = 0, bool isLast = false,
         int lastDepth = 0)
     {
-        if (node.NodeType == Node.Type.Directory && node.Name == "IndieGrobert")
-        {
-            Console.WriteLine($"{depth}, {lastDepth}");
-        }
-
         if (depth != 0)
         {
             for (int i = 0; i < lastDepth; i++)
