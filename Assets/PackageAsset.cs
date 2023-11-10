@@ -2,30 +2,40 @@
 
 public class PackageAsset : Asset
 {
-    private Dictionary<string, Asset> _childs;
+    protected readonly Dictionary<string, Asset> Children;
 
     public PackageAsset(Dictionary<string, Asset> assets)
     {
-        _childs = assets;
+        Children = assets;
     }
 
     public void AddChild(string assetName, Asset asset)
     {
-        _childs.Add(assetName, asset);
+        Children.Add(assetName, asset);
     }
 
     public void AddChildren(Dictionary<string, Asset> assets)
     {
         foreach (var (key, value) in assets)
         {
-            _childs.Add(key, value);
+            Children.Add(key, value);
         }
+    }
+
+    public override byte[] Encode()
+    {
+        throw new Exception("You cannot encode/decode PackageAsset!!!");
+    }
+
+    public override void Decode(Stream s)
+    {
+        throw new Exception("You cannot encode/decode PackageAsset!!!");
     }
 
     public override void SaveTo(string path)
     {
         PrepareDirectory(path);
-        foreach (var (key, value) in _childs)
+        foreach (var (key, value) in Children)
         {
             value.SaveTo(Path.Combine(path, key));
         }
