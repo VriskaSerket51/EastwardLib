@@ -10,6 +10,8 @@ public class TextAsset : Asset
     {
     }
 
+    public string Text => _text ?? string.Empty;
+
     public TextAsset(string text)
     {
         _text = text;
