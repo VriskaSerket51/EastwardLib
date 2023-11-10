@@ -2,7 +2,7 @@
 
 namespace EastwardLib.Assets;
 
-public class Asset
+public abstract class Asset
 {
     public static T Create<T>(byte[] data) where T : Asset, new()
     {
@@ -22,15 +22,9 @@ public class Asset
         return asset;
     }
 
-    public virtual byte[] Encode()
-    {
-        throw new Exception();
-    }
+    public abstract byte[] Encode();
 
-    public virtual void Decode(Stream s)
-    {
-        throw new Exception();
-    }
+    public abstract void Decode(Stream s);
 
     protected void PrepareDirectory(string path)
     {
@@ -43,7 +37,5 @@ public class Asset
         Directory.CreateDirectory(directory);
     }
 
-    public virtual void SaveTo(string path)
-    {
-    }
+    public abstract void SaveTo(string path);
 }
