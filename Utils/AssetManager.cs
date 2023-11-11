@@ -1,4 +1,4 @@
-﻿using EastwardLib.Assets;
+using EastwardLib.Assets;
 using EastwardLib.Exceptions;
 using EastwardLib.Fmod;
 using EastwardLib.MetaData;
@@ -50,31 +50,6 @@ public class AssetManager
         return new AssetManager(assetIndex, scriptLibrary, textureIndex);
     }
 
-    public void Log()
-    {
-        List<string> types = new List<string>();
-        foreach (var (_, value) in _assetIndex)
-        {
-            var fileType = value.FileType;
-            var type = value.Type;
-            if (types.Contains(type))
-            {
-                continue;
-            }
-
-            types.Add(type);
-            // if (fileType == "d")
-            // {
-            //     Console.WriteLine($"Dir: {type}");
-            // }
-
-            if (fileType == "v")
-            {
-                Console.WriteLine($"Virtual: {type}");
-            }
-        }
-    }
-
     public static AssetManager Create(string path)
     {
         if (!File.Exists(path))
@@ -109,6 +84,17 @@ public class AssetManager
     public void UnloadArchives()
     {
         _archives.Clear();
+    }
+
+    public IEnumerator<AssetInfo> SearchByType(string type)
+    {
+        foreach (var (_, assetInfo) in _assetIndex)
+        {
+            if (assetInfo.Type == type)
+            {
+                yield return assetInfo;
+            }
+        }
     }
 
     public void LoadAssets()
