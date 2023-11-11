@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 namespace EastwardLib.MetaData;
 
@@ -46,6 +46,29 @@ public class FileTree
 
             Children[directory] = childNode;
         }
+
+        public void RemoveChild(List<string> fileDirs)
+        {
+            if (Children == null)
+            {
+                return;
+            }
+
+            if (fileDirs.Count == 1)
+            {
+                var fileName = fileDirs[0];
+                Children.Remove(fileName);
+                return;
+            }
+
+            var directory = fileDirs[0];
+            fileDirs.RemoveAt(0);
+
+            if (Children.TryGetValue(directory, out var childNode))
+            {
+                childNode.RemoveChild(fileDirs);
+            }
+        }
     }
 
     private Node _root = new()
@@ -54,9 +77,18 @@ public class FileTree
         Name = "root"
     };
 
+    public List<string> Files { get; } = new();
+
     public void AppendFileName(string fileName)
     {
         _root.AddChild(fileName.Split('/').ToList());
+        Files.Add(fileName);
+    }
+
+    public void RemoveFileName(string fileName)
+    {
+        _root.RemoveChild(fileName.Split('/').ToList());
+        Files.Remove(fileName);
     }
 
     public override string ToString()
