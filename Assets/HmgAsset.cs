@@ -30,6 +30,11 @@ public class HmgAsset : Asset
         return new(RgbaImage.Load(path));
     }
 
+    public override Asset CompileSource(Stream stream)
+    {
+        return new HmgAsset(Compilation.PsdReader.LoadImage(stream)) { Header = Header };
+    }
+
     public override byte[] Encode()
     {
         var paddingA = Header?.PaddingA.ToArray() ?? CreatePadding();

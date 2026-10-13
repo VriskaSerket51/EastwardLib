@@ -83,4 +83,26 @@ public class SceneAsset : PackageAsset
             base.SaveTo(path);
         }
     }
+
+    public override Asset CompileSource(string path)
+    {
+        if (_single != null)
+        {
+            return _single.CompileSource(path);
+        }
+
+        var items = new Dictionary<string, Asset>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+        {
+            var name = Path.GetRelativePath(path, file).Replace('\\', '/');
+            items.Add(name, name == "scene_index.json" || name.EndsWith(".scene_group", StringComparison.Ordinal) && !name.Contains('/')
+                ? new JsonAsset(JsonNode.Parse(File.ReadAllBytes(file))) : new BinaryAsset(File.ReadAllBytes(file)));
+        }
+        if (!items.ContainsKey("scene_index.json"))
+        {
+            throw new InvalidDataException("Missing scene_index.json");
+        }
+
+        return new PackageAsset(items);
+    }
 }

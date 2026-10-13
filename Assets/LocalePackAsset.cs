@@ -30,6 +30,33 @@ public class LocalePackAsset : Asset
         throw new NotSupportedException("Locale packs contain configuration and language files; use language tables individually");
     }
 
+    private LocalePackAsset(JsonNode config, Dictionary<string, JsonNode> languages)
+    {
+        Config = config.DeepClone();
+        foreach (var (name, data) in languages)
+        {
+            Languages.Add(name, data.DeepClone());
+        }
+    }
+
+    public override Asset CompileSource(string path)
+    {
+        var configPath = Path.Combine(path, "locale_pack.json");
+        var config = File.Exists(configPath) ? JsonNode.Parse(File.ReadAllBytes(configPath)) ?? throw new InvalidDataException("Empty locale configuration") : Config;
+        var languages = new Dictionary<string, JsonNode>(StringComparer.Ordinal);
+        foreach (var language in Directory.EnumerateDirectories(Path.Combine(path, "locales")))
+        {
+            var table = new JsonObject();
+            foreach (var file in Directory.EnumerateFiles(language, "*.po"))
+            {
+                table.Add(Path.GetFileNameWithoutExtension(file), Compilation.LocaleCompiler.ReadPo(File.ReadAllText(file)));
+            }
+
+            languages.Add(Path.GetFileName(language), table);
+        }
+        return new LocalePackAsset(config, languages);
+    }
+
     public override void Decode(Stream stream)
     {
         throw new NotSupportedException("Load locale packs through AssetManager");

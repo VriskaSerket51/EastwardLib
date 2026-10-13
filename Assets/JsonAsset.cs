@@ -42,6 +42,11 @@ public class JsonAsset : Asset
         return new(JsonNode.Parse(MessagePackSerializer.ConvertToJson(bytes)), true);
     }
 
+    public override Asset CompileSource(Stream stream)
+    {
+        return new JsonAsset(JsonNode.Parse(stream, documentOptions: new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }), _packed);
+    }
+
     public override void SaveTo(string path)
     {
         path = SafePath.PrepareFile(path);

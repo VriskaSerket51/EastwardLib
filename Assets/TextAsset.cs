@@ -18,6 +18,11 @@ public class TextAsset : Asset
 
     public string Text => _text ?? string.Empty;
 
+    public override Asset CompileSource(Stream stream)
+    {
+        return Create<TextAsset>(stream);
+    }
+
     public override byte[] Encode()
     {
         return Encoding.UTF8.GetBytes(_text ?? throw new InvalidOperationException("No text data loaded"));

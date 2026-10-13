@@ -24,6 +24,11 @@ public class LuaAsset : BinaryAsset
         _source = null;
     }
 
+    public override Asset CompileSource(Stream stream)
+    {
+        return new LuaAsset(Create<BinaryAsset>(stream).Encode(), _decompiler);
+    }
+
     /// <summary>Decompile only when editor source is explicitly requested.</summary>
     public string GetSource()
     {

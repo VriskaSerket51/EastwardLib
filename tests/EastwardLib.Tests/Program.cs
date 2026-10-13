@@ -3,7 +3,9 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Nodes;
 using EastwardLib.Assets;
+using EastwardLib.Compilation;
 using EastwardLib.MetaData;
+using EastwardLib.Modding;
 using EastwardLib.Utils;
 using MessagePack;
 
@@ -24,9 +26,18 @@ var tests = new (string Name, Action Run)[]
     ("Source project packages and original references", SourceProject),
     ("Extraction containment", Paths),
     ("Shared output paths, concurrent writes, PNG, archives and locale encoding", Output),
-    ("Lossless metadata editing, validation, relationships and cache invalidation", Metadata)
+    ("Lossless metadata editing, validation, relationships and cache invalidation", Metadata),
+    ("Source compilation, shared atlases and archive preservation", Compilation),
+    ("In-memory edits, mod packages, compatibility and transactional saves", Modding),
+    ("Lazy archive loading and transactional overlay resolution", LazyArchives)
 };
 foreach (var test in tests) { test.Run(); Console.WriteLine("PASS " + test.Name); }
+
+if (args.Length >= 3 && args[0] == "--compile")
+{
+    AuditCompilation(args[1], args.Skip(2).ToArray());
+    return;
+}
 if (args.Length > 0 && args[0] == "--metadata")
 {
     var count = 0;
@@ -136,6 +147,258 @@ static void Check(bool condition, string message)
     {
         throw new Exception(message);
     }
+}
+
+static void Compilation()
+{
+    var root = Path.Combine(Path.GetTempPath(), "EastwardLib-compile-" + Guid.NewGuid());
+    Directory.CreateDirectory(root);
+    try
+    {
+        var manager = Manager("""
+            {"hello.txt":{"type":"text","objectFiles":{"data":"fixture/text"}},"event.sq":{"type":"sq_script","objectFiles":{"data":"fixture/sq","packed_data":"fixture/sq.packed"}},"scene.proto":{"type":"proto","objectFiles":{"def":"fixture/proto","packed_def":"fixture/proto.packed"}}}
+            """);
+        var archive = GArchive.Create("fixture");
+        archive["fixture/text"] = "original"u8.ToArray();
+        archive["fixture/sq"] = Encoding.UTF8.GetBytes(SQCompiler.Compile("", "event.sq").ToJsonString());
+        archive["fixture/proto"] = "{}"u8.ToArray();
+        archive["fixture/untouched"] = [1, 3, 5];
+        manager.LoadArchive(archive);
+        var text = Path.Combine(root, "hello.txt");
+        File.WriteAllText(text, "edited 한글");
+        Asset originalText = manager.LoadAsset("hello.txt")!;
+        var editedText = originalText.CompileSource(text);
+        Check(editedText is TextAsset && Encoding.UTF8.GetString(editedText.Encode()) == "edited 한글" && Encoding.UTF8.GetString(originalText.Encode()) == "original", "Virtual source compilation changed its original asset");
+        var sq = Path.Combine(root, "event.sq");
+        File.WriteAllText(sq, "!start\n@John,Sam\n\tif ready\n\t\tsay: 안녕 //$voice(hello)\n\t\t\tsecond line\n\telse\n\t\twait 1; go\n");
+        var compiler = new AssetCompiler(manager);
+        var result = compiler.Compile(new Dictionary<string, string> { ["hello.txt"] = text, ["event.sq"] = sq });
+        Check(Encoding.UTF8.GetString(result["fixture/text"]) == "edited 한글" && JsonNode.DeepEquals(JsonNode.Parse(result["fixture/sq"]), JsonNode.Parse(MessagePackSerializer.ConvertToJson(result["fixture/sq.packed"]))), "Compiled JSON and packed SQ differ");
+        var data = JsonNode.Parse(result["fixture/sq"])!;
+        var action = data["children"]![1]!["children"]![0]!["children"]![0]!;
+        Check(action["args"]![1]!.ToString() == "second line" && action["inlineDirectives"]![0]!["name"]!.ToString() == "voice", "Multiline SQ or directives lost");
+        var output = Path.Combine(root, "archives");
+        compiler.SaveTo(output, result);
+        var saved = GArchive.Read(Path.Combine(output, "fixture.g"));
+        Check(saved["fixture/untouched"].SequenceEqual(archive["fixture/untouched"]) && Encoding.UTF8.GetString(archive["fixture/text"]) == "original", "Compilation changed unrelated files or the loaded archive");
+        File.WriteAllText(sq, "else");
+        Reject(() => compiler.Compile(new Dictionary<string, string> { ["hello.txt"] = text, ["event.sq"] = sq }));
+        Check(Encoding.UTF8.GetString(archive["fixture/text"]) == "original", "Failed compilation changed the archive");
+        Reject(() => SQCompiler.Compile("switch value\n\twait 1"));
+        Reject(() => SQCompiler.Compile(".name value"));
+        var proto = Path.Combine(root, "source.proto");
+        File.WriteAllText(proto, "{\"unknown\":false}");
+        result = compiler.Compile("scene.proto", proto);
+        Check(JsonNode.Parse(MessagePackSerializer.ConvertToJson(result["fixture/proto.packed"]))!["unknown"]!.ToJsonString() == "false", "Prototype compilation lost values");
+
+        var image = new RgbaImage(1, 1, [50, 60, 70, 128]);
+        var composite = Path.Combine(root, "composite.psd");
+        File.WriteAllBytes(composite, PsdWriter.Write(image));
+        Asset originalImage = new HmgAsset(new RgbaImage(1, 1, [1, 2, 3, 4]));
+        var editedImage = (HmgAsset)originalImage.CompileSource(composite);
+        Check(editedImage.Image!.Pixels.SequenceEqual(image.Pixels) && ((HmgAsset)originalImage).Image!.Pixels[0] == 1, "Composite PSD source import changed pixels or its original image");
+        var compositeBytes = File.ReadAllBytes(composite);
+        foreach (var prediction in new[] { false, true })
+        {
+            using var compressed = new MemoryStream();
+            compressed.Write(compositeBytes.AsSpan(0, 38));
+            compressed.WriteByte(0);
+            compressed.WriteByte((byte)(prediction ? 3 : 2));
+            using (var zlib = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionMode.Compress, true)) zlib.Write(compositeBytes.AsSpan(40));
+            File.WriteAllBytes(composite, compressed.ToArray());
+            Check(PsdReader.LoadImage(composite).Pixels.SequenceEqual(image.Pixels), "ZIP PSD composite lost pixels");
+        }
+        var psd = Path.Combine(root, "layers.psd");
+        File.WriteAllBytes(psd, PsdWriter.Write([new PsdWriter.Layer("그룹", Children: [new PsdWriter.Layer("pixel", image, 2, 3)])]));
+        var layers = PsdReader.Read(psd);
+        Check(layers[0].Name == "그룹" && layers[0].Children![0].X == 2 && layers[0].Children![0].Image!.Pixels.SequenceEqual(image.Pixels), "PSD layer import changed names, offsets or pixels");
+        var definition = JsonNode.Parse("""
+            {"anims":{"a":{"name":"idle","seq":[["f",0.1]]}},"frames":{"f":{"parts":[["m",-2,3]],"meta":{"anchors":{"hand":[[1,2,"#ff0000"]]}}}},"modules":{"m":{"rect":[0,0,1,1],"atlas":"a","feature":1}},"features":[{"id":1,"name":"head.eye"}]}
+            """)!;
+        var ase = Path.Combine(root, "sprite.ase");
+        File.WriteAllBytes(ase, AseWriter.Write(definition, new Dictionary<string, RgbaImage> { ["a"] = image }));
+        var sprite = SpriteCompiler.Compile(ase, definition, "a", "atlas", 16, 16);
+        var spriteData = sprite.Definition;
+        Check(spriteData["anims"]!["1"]!["name"]!.ToString() == "idle" && spriteData["frames"]!["1"]!["parts"]![0]![1]!.GetValue<int>() == -2 && spriteData["frames"]!["1"]!["meta"]!["anchors"]!["hand"]![0]![1]!.GetValue<int>() == 2, "ASE compilation lost animation names, origin or anchors");
+        Check(AseReader.Read(ase).Frames[0].Duration == 100 && AseWriter.Write(spriteData, new Dictionary<string, RgbaImage> { ["a"] = sprite.Atlas }).Length > 128, "Compiled sprite cannot be read again");
+
+        var workbook = new WorkbookAsset(JsonNode.Parse("{\"table\":[{\"name\":\"Sam\",\"hp\":10}],\"vertical\":[{\"x\":1},{\"x\":2}]}")!, JsonNode.Parse("{\"table\":{\"type\":\"list\",\"keys\":[\"name\",\"hp\"],\"keyMeta\":[\"localizable\",false],\"unknown\":false},\"vertical\":{\"type\":\"vlist\",\"keys\":[\"x\"],\"keyMeta\":[false]}}")!);
+        foreach (var extension in new[] { ".xls", ".xlsx" })
+        {
+            var file = Path.Combine(root, "book" + extension);
+            workbook.SaveTo(file);
+            var book = WorkbookCompiler.Compile(file, workbook.Metadata);
+            Check(JsonNode.DeepEquals(book.Data, workbook.Data) && book.Metadata["table"]!["keyMeta"]![0]!.ToString() == "localizable" && book.Metadata["table"]!["unknown"]!.ToJsonString() == "false", "Workbook source compilation changed values or metadata");
+        }
+        var po = LocaleCompiler.ReadPo("msgid \"\"\nmsgstr \"\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\nmsgid \"hello\"\nmsgstr \"안녕\\n\"\n\"second\"\n");
+        Check(po["hello"]!.ToString() == "안녕\nsecond" && JsonNode.DeepEquals(LuaTable.Parse("return " + LocaleCompiler.WriteLua(po)), po), "PO compilation or Lua escaping differs");
+        Check(CsvCompiler.Compile("name,value\n\"hello, world\",1\n", "test.list.csv")[0]!["name"]!.ToString() == "hello, world", "CSV quoting changed");
+        Reject(() => CsvCompiler.Compile("\"unterminated", "test.csv"));
+
+        var fsm = "return (function() nodelist={['start']={localName='start',type='state'};['done']={localName='done',type='state'};}; nodelist['start'].next={['$done']='done';[true]='done';}; return nodelist end) ()";
+        var fsmCompiled = FsmSource.Parse(GraphCompiler.Compile("fsm_scheme", SourceGraph.FromFsm(fsm), fsm));
+        Check(fsmCompiled["start"]!["next"]!["true"]!.ToString() == "done", "FSM fallback compilation differs");
+        var quest = JsonNode.Parse("{\"nodes\":[{\"id\":\"a\",\"name\":\"first\",\"transition\":{\"flag\":1}},{\"id\":\"b\",\"name\":\"next\"}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"type\":\"spawn\",\"cond\":\"ready\"}]}")!;
+        var questCompiled = JsonNode.Parse(GraphCompiler.Compile("quest_scheme", SourceGraph.Write("quest_scheme", quest), quest.ToJsonString()))!;
+        Check(questCompiled["nodes"]![0]!["transition"]!["flag"]!.GetValue<int>() == 1 && questCompiled["connections"]![0]!["type"]!.ToString() == "spawn", "Quest transition compilation differs");
+        var mesh = "<ASSIMP><Scene><Node><MeshRefs>0</MeshRefs></Node><MeshList><Mesh><Positions>0 0 0\n1 0 0\n0 1 0</Positions><Normals>0 0 1\n0 0 1\n0 0 1</Normals><FaceList><Face>0 1 2</Face></FaceList></Mesh></MeshList></Scene></ASSIMP>";
+        var converted = MeshConverter.Convert(mesh);
+        Check(MeshConverter.Convert(MeshCompiler.Compile(converted.Obj, mesh)).Obj == converted.Obj, "OBJ compilation changed geometry");
+
+        var textureData = TextureIndex.Create("""
+            {"root":"1","map":{"1":{"body":{"groups":["2"]}},"2":{"body":{"atlasMode":true,"atlasCachePath":"fixture/atlas","premultiplyAlpha":true,"textures":["3","4"]}},"3":{"body":{"path":"a.png","atlasId":1,"x":1,"y":1,"w":1,"h":1}},"4":{"body":{"path":"b.png","atlasId":1,"x":2,"y":1,"w":1,"h":1}}}}
+            """);
+        var textureManager = new AssetManager(AssetIndex.Create("{\"a.png\":{\"type\":\"texture\"},\"b.png\":{\"type\":\"texture\"}}"), ScriptLibrary.Create("{\"source\":{}}"), textureData);
+        var originalPage = new HmgAsset(new RgbaImage(4, 4, Enumerable.Repeat((byte)255, 64).ToArray()));
+        archive["fixture/atlas/page.hmg"] = originalPage.Encode([1, 2], [3]);
+        archive["fixture/atlas/atlas.json"] = "{\"atlases\":[{\"name\":\"page.hmg\"}]}"u8.ToArray();
+        textureManager.LoadArchive(archive);
+        var a = Path.Combine(root, "a.png");
+        var b = Path.Combine(root, "b.png");
+        image.SavePng(a);
+        new RgbaImage(1, 1, [10, 20, 30, 255]).SavePng(b);
+        var pages = new AssetCompiler(textureManager).Compile(new Dictionary<string, string> { ["a.png"] = a, ["b.png"] = b });
+        var page = Asset.Create<HmgAsset>(pages["fixture/atlas/page.hmg"]);
+        Check(page.Image!.Crop(1, 1, 1, 1).Pixels.SequenceEqual(new byte[] { 25, 30, 35, 128 }) && page.Image.Crop(2, 1, 1, 1).Pixels.SequenceEqual(new byte[] { 10, 20, 30, 255 }) && page.Image.Crop(0, 0, 1, 1).Pixels.All(value => value == 255), "Shared atlas edit lost replacement pixels or changed its neighbours");
+        Check(page.Header!.PaddingA.Span.SequenceEqual(new byte[] { 1, 2 }) && page.Header.PaddingB.Span.SequenceEqual(new byte[] { 3 }), "Atlas compilation changed HMG padding");
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static void LazyArchives()
+{
+    var root = Path.Combine(Path.GetTempPath(), "EastwardLib-lazy-" + Guid.NewGuid());
+    Directory.CreateDirectory(root);
+    try
+    {
+        var manager = Manager("{}");
+        var original = GArchive.Create("fixture");
+        original["fixture/text"] = "base"u8.ToArray();
+        var basePath = Path.Combine(root, "base", "fixture.g");
+        original.Write(basePath);
+        manager.RegisterArchive(basePath);
+        File.WriteAllBytes(basePath, []);
+        Reject(() => manager.LoadFile("fixture/text"));
+        original.Write(basePath);
+        var overlay = GArchive.Create("fixture");
+        overlay["fixture/text"] = "overlay"u8.ToArray();
+        overlay["fixture/new"] = [7];
+        var overlayPath = Path.Combine(root, "overlay", "fixture.g");
+        overlay.Write(overlayPath);
+        manager.RegisterArchive(overlayPath);
+        Check(Encoding.UTF8.GetString(manager.LoadFile("fixture/text")!) == "overlay" && manager.FileExists("fixture/new") && manager.GetFiles("fixture").Count == 2, "Lazy overlays did not retain later entries");
+        manager.UnloadArchives();
+        manager.LoadArchive(original);
+        manager.RegisterArchive(overlayPath);
+        var corruptPath = Path.Combine(root, "corrupt", "fixture.g");
+        Directory.CreateDirectory(Path.GetDirectoryName(corruptPath)!);
+        File.WriteAllBytes(corruptPath, []);
+        manager.RegisterArchive(corruptPath);
+        Reject(() => manager.LoadFile("fixture/text"));
+        Check(Encoding.UTF8.GetString(original["fixture/text"]) == "base" && !original.ContainsKey("fixture/new"), "Failed pending overlays partially changed a loaded archive");
+        overlay.Write(corruptPath);
+        Check(Encoding.UTF8.GetString(manager.LoadFile("fixture/text")!) == "overlay", "Failed lazy archive resolution could not be retried");
+        manager.UnloadArchive("fixture");
+        Check(manager.LoadFile("fixture/text") == null, "Unloaded archive remains available");
+        manager.RegisterArchive(basePath);
+        manager.UnloadArchives();
+        Check(manager.LoadFile("fixture/text") == null, "Unloaded registrations remain available");
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static void Modding()
+{
+    var root = Path.Combine(Path.GetTempPath(), "EastwardLib-mod-" + Guid.NewGuid());
+    Directory.CreateDirectory(root);
+    try
+    {
+        var manager = Manager("{\"hello.txt\":{\"type\":\"text\",\"objectFiles\":{\"data\":\"fixture/text\"}}}");
+        var original = GArchive.Create("fixture");
+        original["fixture/text"] = "original"u8.ToArray();
+        original["fixture/unchanged"] = [1, 2, 3];
+        manager.LoadArchive(original);
+        var config = GArchive.Create("config");
+        manager.SaveMetadata(config);
+        config["config/asset_index.packed"] = manager.Index.Encode(true);
+        config["config/extra"] = [8, 9];
+        manager.LoadArchive(config);
+        var configBefore = config.ToDictionary(pair => pair.Key, pair => (byte[])pair.Value.Clone());
+        var compiler = new AssetCompiler(manager);
+        var resources = new Dictionary<string, byte[]>(compiler.Compile("hello.txt", new TextAsset("edited")));
+        Check(Encoding.UTF8.GetString(((TextAsset)manager.LoadAsset("hello.txt")!).Encode()) == "original", "In-memory compilation changed the original asset");
+        Reject(() => compiler.Compile(new[] { new KeyValuePair<string, Asset>("hello.txt", new TextAsset("a")), new KeyValuePair<string, Asset>("hello.txt", new TextAsset("b")) }));
+        manager.EditMetadata((assets, _, _) => assets["hello.txt"].Tags = new JsonArray("modded"));
+        foreach (var (path, bytes) in compiler.CompileMetadata()) resources.Add(path, bytes);
+        Check(configBefore.All(pair => config[pair.Key].SequenceEqual(pair.Value)), "Compiling metadata changed the original config archive");
+        resources.Add("fixture/unchanged", [1, 2, 3]);
+        var mod = ModPackage.Create("Example", manager, resources);
+        Check(!mod.ResourcePaths.Contains("fixture/unchanged"), "Mod package contains unchanged data");
+        resources["fixture/text"][0] = 0;
+        var detached = mod.GetResource("fixture/text");
+        detached[0] = 0;
+        Check(Encoding.UTF8.GetString(mod.GetResource("fixture/text")) == "edited", "Mod resource buffers are not isolated");
+        var pathToMod = Path.Combine(root, "example.ewmod");
+        mod.SaveTo(pathToMod);
+        var restored = ModPackage.Read(pathToMod);
+        Check(restored.Name == "Example" && restored.Validate(manager).Count == 0, "Mod package did not round-trip");
+        var output = Path.Combine(root, "applied");
+        restored.ApplyTo(manager, output);
+        var saved = GArchive.Read(Path.Combine(output, "fixture.g"));
+        Check(Encoding.UTF8.GetString(saved["fixture/text"]) == "edited" && saved["fixture/unchanged"].SequenceEqual(original["fixture/unchanged"]), "Applying a mod lost original archive entries");
+        var savedConfig = GArchive.Read(Path.Combine(output, "config.g"));
+        Check(savedConfig["config/extra"].SequenceEqual(config["config/extra"]) && JsonNode.DeepEquals(JsonNode.Parse(savedConfig["config/asset_index"]), JsonNode.Parse(MessagePackSerializer.ConvertToJson(savedConfig["config/asset_index.packed"]))), "Applying metadata lost config entries or packed synchronization");
+        original["fixture/text"] = "another version"u8.ToArray();
+        var conflicts = restored.Validate(manager);
+        Check(conflicts.SequenceEqual(new[] { "fixture/text" }), "Mod compatibility failed to detect a changed original");
+        var rejected = Path.Combine(root, "rejected");
+        Reject(() => restored.ApplyTo(manager, rejected));
+        Check(!Directory.Exists(rejected), "Incompatible mod created output archives");
+        var broken = GArchive.Create("broken");
+        broken["wrong/prefix"] = [1];
+        manager.LoadArchive(broken);
+        var failed = Path.Combine(root, "failed");
+        Reject(() => compiler.SaveTo(failed, new Dictionary<string, byte[]> { ["fixture/text"] = [1], ["broken/new"] = [2] }));
+        Check(!Directory.Exists(failed) && !Directory.EnumerateDirectories(root, ".eastward-compile-*").Any(), "A failed archive save left partial output");
+        using (var zip = ZipFile.Open(pathToMod, ZipArchiveMode.Update))
+        {
+            zip.GetEntry("resources/fixture/text")!.Delete();
+            using var entry = zip.CreateEntry("resources/fixture/text").Open();
+            entry.Write("wrong!"u8);
+        }
+        Reject(() => ModPackage.Read(pathToMod));
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static void AuditCompilation(string sourceRoot, string[] resourceRoots)
+{
+    var manager = AssetManager.Create(Path.Combine(resourceRoots[0], "config.g"));
+    manager.RootDirectory = resourceRoots[0];
+    foreach (var directory in resourceRoots)
+        foreach (var file in Directory.EnumerateFiles(directory, "*.g", SearchOption.AllDirectories)) manager.LoadArchive(GArchive.Read(file));
+    var report = JsonNode.Parse(File.ReadAllText(sourceRoot + ".recovery.json"))!;
+    var mappings = report["pathRemappings"]!.AsObject().ToDictionary(pair => pair.Value!.ToString(), pair => pair.Key);
+    var compiler = new AssetCompiler(manager);
+    var failures = new List<string>();
+    var counts = new Dictionary<string, int>();
+    var selectedTypes = Environment.GetEnvironmentVariable("EASTWARD_COMPILE_TYPES")?.Split(',').ToHashSet(StringComparer.Ordinal);
+    foreach (var (name, entry) in report["restored"]!.AsObject())
+    {
+        if (!manager.Assets.TryGetValue(name, out var info) || info.Type == "folder" || info.FilePath == null) continue;
+        if (selectedTypes != null && !selectedTypes.Contains(info.Type)) continue;
+        try
+        {
+            var resources = compiler.Compile(new Dictionary<string, string> { [name] = SafePath.ResolveWithin(sourceRoot, entry!["path"]!.ToString()) }, mappings);
+            Check(resources.Count > 0, "No compiled resources");
+            counts[info.Type] = counts.GetValueOrDefault(info.Type) + 1;
+        }
+        catch (Exception error) { failures.Add(info.Type + " " + name + ": " + error.Message); }
+        manager.UnloadAssets();
+    }
+    foreach (var (type, count) in counts.OrderBy(pair => pair.Key)) Console.WriteLine($"COMPILE {type}: {count}");
+    foreach (var failure in failures) Console.Error.WriteLine(failure);
+    Check(failures.Count == 0, "Source compilation failures: " + failures.Count);
 }
 
 static void Reject(Action action)

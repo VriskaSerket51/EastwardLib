@@ -52,6 +52,8 @@ assetManager.ExtractTo("./exported");
 
 You can load DLC archives with `LoadArchive()` after loading the base archives. Use `RegisterLoader()` to add or replace an asset loader.
 
+Use `RegisterArchive(path)` to load an archive on its first resource request. Register base files before overlays. Failed pending overlays leave loaded archives unchanged and can be retried.
+
 ### Metadata
 
 You can edit asset, script and texture indices, and save them back into "config.g".
@@ -106,11 +108,48 @@ The output contains `game/asset` and a separate `restored.recovery.json` report.
 
 Source references are updated for restored package paths. XLS files retain available values using BIFF8; formulas and formatting removed from the game data cannot be restored. The writer supports 65,536 rows, 256 columns, 32,767 UTF-16 code units per cell and a CFB stream of about 7 MiB.
 
-Original project settings, Gii/AKU binaries and discarded editing history are not included. You need the matching editor environment to open and build the full project. Quest transition fields need `tests/import_quest_graph.py` with the public Gii importer. Source-to-runtime compilation is not supported.
+Original project settings, Gii/AKU binaries and discarded editing history are not included. You need the matching editor environment to open and build the full project. Quest transition fields need `tests/import_quest_graph.py` with the public Gii importer.
+
+### AssetCompiler
+
+You can compile edited source assets and save them into copies of the original archives.
+
+```cs
+using EastwardLib.Compilation;
+
+var compiler = new AssetCompiler(assetManager);
+var resources = compiler.Compile("script/example.sq", "./edited/example.sq");
+compiler.SaveTo("./compiled", resources);
+```
+
+Use `CompileProject("./restored")` for a restored source tree with its recovery report. Load the original archives and overlays first, and use a new output directory outside the game resources. Other archive entries and HMG padding are retained.
+
+`Asset.CompileSource(path)` is virtual. Each asset reads its source and returns a new asset; the original instance is kept. `AssetCompiler` connects the result to indexed resource paths, updates shared atlases and writes JSON and packed files together.
+
+You can pass an edited `Asset` to `Compile(name, asset)`, or compile several in-memory edits together. `CompileMetadata()` produces updated configuration resources without changing the loaded archive. `SaveTo()` copies entry buffers for writing without compressing and decompressing them first, and publishes the output directory after every archive has been written.
+
+Keep existing workbook sheet names, sprite animation names and indexed atlas texture dimensions. Apply PSD masks and unsupported blend modes before importing. Mesh import accepts static triangle geometry and retains original materials. Lua source is saved as source; this does not compile LuaJIT bytecode. New assets and virtual entries need separate index registration.
+
+### ModPackage
+
+You can save compiled replacements as a portable mod package.
+
+```cs
+using EastwardLib.Modding;
+
+var resources = compiler.Compile("script/example.lua", new LuaAsset("return 1"u8.ToArray()));
+var mod = ModPackage.Create("Example", assetManager, resources);
+mod.SaveTo("example.ewmod");
+
+var restored = ModPackage.Read("example.ewmod");
+restored.ApplyTo(assetManager, "./modded");
+```
+
+Packages contain changed resources with their original hashes. `Validate()` reports resources from a different game version or another mod before applying replacements. Package reads verify paths, sizes and content hashes. Original archives are kept; applying a mod writes a new output directory.
 
 ## Dependencies
 
-The library uses LZ4, Zstd, MessagePack and StbImageSharp. Images use managed RGBA data and do not need System.Drawing or libgdiplus. `HmgAsset.Image` exposes `RgbaImage`; use `HmgAsset.FromImage(path)` to load PNG or JPEG images. FMOD banks are copied without loading the FMOD SDK.
+The library uses LZ4, Zstd, MessagePack, StbImageSharp and ExcelDataReader. Images use managed RGBA data and do not need System.Drawing or libgdiplus. `HmgAsset.Image` exposes `RgbaImage`; use `HmgAsset.FromImage(path)` to load PNG or JPEG images. FMOD banks are copied without loading the FMOD SDK.
 
 Lua bytecode is kept by default. You can set `AssetManager.LuaDecompiler` to use `LuaAsset.GetSource()` or `SaveSourceTo()`. The native library loads on the first decompilation. Plain Lua source does not load it, and localization parsing does not execute Lua.
 

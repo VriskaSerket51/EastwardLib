@@ -30,6 +30,16 @@ public class PackageAsset : Asset
         throw new NotSupportedException("A package contains multiple resource files; encode its items individually");
     }
 
+    public override Asset CompileSource(string path)
+    {
+        var items = new Dictionary<string, Asset>(StringComparer.Ordinal);
+        foreach (var (name, asset) in Children)
+        {
+            items.Add(name, asset.CompileSource(SafePath.ResolveWithin(path, name)));
+        }
+        return new PackageAsset(items);
+    }
+
     public override void Decode(Stream stream)
     {
         throw new NotSupportedException("Load package items through AssetManager");

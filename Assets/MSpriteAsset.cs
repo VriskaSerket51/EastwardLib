@@ -8,6 +8,8 @@ public class MSpriteAsset : JsonAsset
 {
     private readonly AssetManager _manager;
     private readonly AssetInfo _info;
+    private IReadOnlyDictionary<string, RgbaImage>? _compiledAtlases;
+    public IReadOnlyDictionary<string, RgbaImage> AtlasImages => _compiledAtlases ?? LoadAtlases();
 
     public MSpriteAsset(AssetManager manager, AssetInfo info) : base(manager.LoadDefinition(info).Data)
     {
@@ -17,7 +19,7 @@ public class MSpriteAsset : JsonAsset
 
     public byte[] ToAse()
     {
-        return AseWriter.Write(Data!, LoadAtlases());
+        return AseWriter.Write(Data!, AtlasImages);
     }
 
     private Dictionary<string, RgbaImage> LoadAtlases()
@@ -43,9 +45,28 @@ public class MSpriteAsset : JsonAsset
         return atlases;
     }
 
+    public override Asset CompileSource(string path)
+    {
+        var atlas = Data!["atlases"]!.AsObject().First();
+        var image = AtlasImages[atlas.Key];
+        var result = Compilation.SpriteCompiler.Compile(path, Data, atlas.Key, atlas.Value!.ToString(), image.Width, image.Height, image);
+        var names = Data["anims"]!.AsObject().Select(pair => pair.Value!).Where(animation => animation["seq"]!.AsArray().Count > 0).Select(animation => animation["name"]!.ToString()).Order(StringComparer.Ordinal);
+        var editedNames = result.Definition["anims"]!.AsObject().Select(pair => pair.Value!["name"]!.ToString()).Order(StringComparer.Ordinal);
+        if (!names.SequenceEqual(editedNames))
+        {
+            throw new NotSupportedException("Keep indexed sprite animation names; new virtual sequences require index registration");
+        }
+
+        return new MSpriteAsset(_manager, _info)
+        {
+            Data = result.Definition,
+            _compiledAtlases = new Dictionary<string, RgbaImage>(StringComparer.Ordinal) { [atlas.Key] = result.Atlas }
+        };
+    }
+
     public void SaveSourceTo(string path)
     {
-        var atlases = LoadAtlases();
+        var atlases = AtlasImages;
         var animations = Data!["anims"]!.AsObject().Select(pair => pair.Value!).ToArray();
         var bases = animations.Where(animation => !animation["name"]!.ToString().Contains(':')).ToArray();
         if (animations.Any(animation => animation["name"]!.ToString().Contains(':') && !bases.Any(parent => animation["name"]!.ToString().StartsWith(parent["name"] + ":", StringComparison.Ordinal))))
@@ -105,6 +126,61 @@ public class MSpriteAsset : JsonAsset
         {
             base.SaveTo(path);
         }
+    }
+
+    public RgbaImage RenderFrame(string name, int index)
+    {
+        static int Number(JsonNode? value) => checked((int)double.Parse(value!.ToString(), System.Globalization.CultureInfo.InvariantCulture));
+        var animation = Data!["anims"]!.AsObject().Select(pair => pair.Value!).FirstOrDefault(value => value["name"]?.ToString() == name)
+            ?? throw new InvalidDataException("Missing sprite animation: " + name);
+        var sequence = animation["seq"]!.AsArray();
+        if (index < 0 || index >= sequence.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        var entry = sequence[index]!.AsArray();
+        var frame = Data["frames"]![entry[0]!.ToString()]!;
+        var atlases = AtlasImages;
+        var parts = frame["parts"]!.AsArray().Select(part =>
+        {
+            var module = Data["modules"]![part![0]!.ToString()]!;
+            var rect = module["rect"]!.AsArray().Select(Number).ToArray();
+            var atlas = module["atlas"]?.ToString();
+            var image = atlas != null ? atlases[atlas] : atlases.Count == 1 ? atlases.Values.First() : throw new InvalidDataException("Missing sprite atlas");
+            return (Image: image.Crop(rect[0], rect[1], rect[2], rect[3]), X: Number(part[1]) + (entry.Count > 2 ? Number(entry[2]) : 0), Y: Number(part[2]) + (entry.Count > 3 ? Number(entry[3]) : 0));
+        }).ToArray();
+        var left = parts.Select(part => part.X).Append(0).Min();
+        var top = parts.Select(part => part.Y).Append(0).Min();
+        var right = parts.Select(part => checked(part.X + part.Image.Width)).Append(1).Max();
+        var bottom = parts.Select(part => checked(part.Y + part.Image.Height)).Append(1).Max();
+        var result = new RgbaImage(checked(right - left), checked(bottom - top), new byte[checked((right - left) * (bottom - top) * 4)]);
+        foreach (var part in parts)
+        {
+            for (var y = 0; y < part.Image.Height; y++)
+            {
+                for (var x = 0; x < part.Image.Width; x++)
+                {
+                    var source = (y * part.Image.Width + x) * 4;
+                    var target = ((part.Y - top + y) * result.Width + part.X - left + x) * 4;
+                    var alpha = part.Image.Pixels[source + 3] / 255.0;
+                    var previous = result.Pixels[target + 3] / 255.0;
+                    var combined = alpha + previous * (1 - alpha);
+                    if (combined == 0)
+                    {
+                        continue;
+                    }
+
+                    for (var channel = 0; channel < 3; channel++)
+                    {
+                        result.Pixels[target + channel] = (byte)Math.Clamp(Math.Round((part.Image.Pixels[source + channel] * alpha + result.Pixels[target + channel] * previous * (1 - alpha)) / combined), 0, 255);
+                    }
+
+                    result.Pixels[target + 3] = (byte)Math.Clamp(Math.Round(combined * 255), 0, 255);
+                }
+            }
+        }
+        return result;
     }
 
     public JsonNode FindAnimation(string name)

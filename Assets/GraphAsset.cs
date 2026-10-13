@@ -37,6 +37,11 @@ public class GraphAsset : TextAsset
         return SourceGraph.Write(GraphType, data);
     }
 
+    public override Asset CompileSource(Stream stream)
+    {
+        return new GraphAsset(GraphType, Compilation.GraphCompiler.Compile(GraphType, Create<TextAsset>(stream).Text, Text));
+    }
+
     public void SaveSourceTo(string path)
     {
         path = SafePath.PrepareFile(path);

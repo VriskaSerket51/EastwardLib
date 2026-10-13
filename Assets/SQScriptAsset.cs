@@ -9,6 +9,16 @@ public class SQScriptAsset : JsonAsset
 {
     public SQScriptAsset(JsonNode data) : base(data) { }
 
+    public override Asset CompileSource(string path)
+    {
+        return new SQScriptAsset(Compilation.SQCompiler.Compile(File.ReadAllText(path), Data?["file"]?.ToString() ?? Path.GetFileName(path)));
+    }
+
+    public override Asset CompileSource(Stream stream)
+    {
+        return new SQScriptAsset(Compilation.SQCompiler.Compile(Create<TextAsset>(stream).Text, Data?["file"]?.ToString() ?? "script.sq"));
+    }
+
     public string GetSource()
     {
         var output = new StringBuilder();
@@ -110,12 +120,27 @@ public class SQScriptAsset : JsonAsset
 
     private static bool Truthy(JsonNode? node)
     {
-        if (node == null) return false;
+        if (node == null)
+        {
+            return false;
+        }
+
         if (node is JsonValue value)
         {
-            if (value.TryGetValue<bool>(out var flag)) return flag;
-            if (value.TryGetValue<double>(out var number)) return number != 0;
-            if (value.TryGetValue<string>(out var text)) return text.Length > 0;
+            if (value.TryGetValue<bool>(out var flag))
+            {
+                return flag;
+            }
+
+            if (value.TryGetValue<double>(out var number))
+            {
+                return number != 0;
+            }
+
+            if (value.TryGetValue<string>(out var text))
+            {
+                return text.Length > 0;
+            }
         }
         return true;
     }

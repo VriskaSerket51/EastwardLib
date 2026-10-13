@@ -20,6 +20,11 @@ public class BinaryAsset : Asset
         return _data ?? throw new InvalidOperationException("No binary data loaded");
     }
 
+    public override Asset CompileSource(Stream stream)
+    {
+        return Create<BinaryAsset>(stream);
+    }
+
     public override void Decode(Stream stream)
     {
         using var buffer = new MemoryStream();

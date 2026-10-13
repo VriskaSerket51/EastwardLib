@@ -92,7 +92,7 @@ public sealed class SourceReference
         return true;
     }
 
-    private string RewritePrototypes(string text)
+    internal string RewritePrototypes(string text)
     {
         JsonNode? data;
         try

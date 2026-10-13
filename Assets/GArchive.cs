@@ -23,6 +23,21 @@ public class GArchive : Dictionary<string, byte[]>
         return new(name);
     }
 
+    // The writer replaces entries instead of mutating buffers, so unchanged data can be shared.
+    internal GArchive CopyForWriting()
+    {
+        var copy = new GArchive(ArchiveName, Count);
+        foreach (var (name, bytes) in this)
+        {
+            copy.Add(name, bytes);
+        }
+        foreach (var (name, compressed) in _compressed)
+        {
+            copy._compressed.Add(name, compressed);
+        }
+        return copy;
+    }
+
     public void AddOverlay(GArchive archive)
     {
         if (archive.ArchiveName != ArchiveName)

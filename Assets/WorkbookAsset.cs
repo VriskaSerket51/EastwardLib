@@ -19,6 +19,18 @@ public class WorkbookAsset : JsonAsset
         Metadata = metadata.DeepClone();
     }
 
+    public override Asset CompileSource(Stream stream)
+    {
+        var result = Compilation.WorkbookCompiler.Compile(stream, Metadata);
+        return new WorkbookAsset(result.Data, result.Metadata);
+    }
+
+    public WorkbookAsset CompileData(JsonNode data)
+    {
+        var result = Compilation.WorkbookCompiler.CompileData(data, Metadata);
+        return new WorkbookAsset(result.Data, result.Metadata);
+    }
+
     public IReadOnlyList<IReadOnlyList<JsonNode?>> GetRows(string name)
     {
         var data = Data![name]!;

@@ -47,4 +47,38 @@ public class TilesetPackAsset : PackageAsset
             base.SaveTo(path);
         }
     }
+
+    public override Asset CompileSource(string path)
+    {
+        var layers = Compilation.PsdReader.Read(path);
+        var data = ((JsonAsset)Items["tileset.json"]).Data!;
+        var original = ((HmgAsset)Items["atlas.png"]).Image!;
+        var atlas = new RgbaImage(original.Width, original.Height, (byte[])original.Pixels.Clone());
+        foreach (var theme in data["themes"]!.AsArray())
+        {
+            foreach (var group in theme!["groups"]!.AsArray())
+            {
+                foreach (var tile in group!["tiles"]!.AsArray())
+                {
+                    var themeLayer = layers.Single(layer => layer.Name == theme["raw_name"]!.ToString());
+                    var groupLayer = themeLayer.Children!.Single(layer => layer.Name == group["raw_name"]!.ToString());
+                    var layer = groupLayer.Children!.Single(layer => layer.Name == tile!["basename"]!.ToString());
+                    var rect = tile!["rect"]!.AsArray().Select(value => int.Parse(value!.ToString(), CultureInfo.InvariantCulture)).ToArray();
+                    var raw = tile["raw_rect"]!.AsArray().Select(value => int.Parse(value!.ToString(), CultureInfo.InvariantCulture)).ToArray();
+                    if (layer.Image == null || layer.Image.Width != rect[2] || layer.Image.Height != rect[3] || layer.X != raw[0] || layer.Y != raw[1])
+                    {
+                        throw new InvalidDataException("Keep indexed tileset layer bounds: " + layer.Name);
+                    }
+
+                    atlas.Crop(rect[0], rect[1], rect[2], rect[3]);
+                    for (var row = 0; row < rect[3]; row++)
+                    {
+                        layer.Image.Pixels.AsSpan(row * rect[2] * 4, rect[2] * 4).CopyTo(atlas.Pixels.AsSpan(((rect[1] + row) * atlas.Width + rect[0]) * 4));
+                    }
+                }
+            }
+        }
+
+        return new TilesetPackAsset(data.DeepClone(), atlas);
+    }
 }

@@ -12,8 +12,10 @@ public class AssetManager
     private readonly ScriptLibrary _scriptLibrary;
     private readonly TextureIndex _textureIndex;
     private readonly Dictionary<string, GArchive> _archives = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<string>> _archiveSources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Asset> _assets = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Func<AssetInfo, Asset?>> _loaders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Func<AssetInfo, Asset?>> _customLoaders = new(StringComparer.Ordinal);
     private readonly Dictionary<string, RgbaImage[]> _atlases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _loading = new(StringComparer.Ordinal);
     private Dictionary<string, AssetInfo[]> _children = new(StringComparer.Ordinal);
@@ -40,6 +42,32 @@ public class AssetManager
         _textureIndex.Changed += MetadataChanged;
         MetadataChanged();
         RegisterDefaultLoaders();
+    }
+
+    /// <summary>Create independent metadata and asset caches over the same input archive sources.</summary>
+    public AssetManager CopyForEditing()
+    {
+        var copy = new AssetManager(AssetIndex.Create(_assetIndex.ToJson(false)), ScriptLibrary.Create(_scriptLibrary.ToJson(false)), TextureIndex.Create(_textureIndex.ToJson(false)))
+        {
+            RootDirectory = RootDirectory,
+            LuaDecompiler = LuaDecompiler
+        };
+        foreach (var (name, archive) in _archives)
+        {
+            copy._archives.Add(name, archive.CopyForWriting());
+        }
+
+        foreach (var (name, sources) in _archiveSources)
+        {
+            copy._archiveSources.Add(name, [.. sources]);
+        }
+
+        foreach (var (type, loader) in _customLoaders)
+        {
+            copy.RegisterLoader(type, loader);
+        }
+
+        return copy;
     }
 
     private void MetadataChanged()
@@ -187,7 +215,8 @@ public class AssetManager
 
     public void LoadArchive(GArchive archive)
     {
-        if (_archives.TryGetValue(archive.ArchiveName, out var previous))
+        ArgumentNullException.ThrowIfNull(archive);
+        if (GetLoadedArchive(archive.ArchiveName) is GArchive previous)
         {
             previous.AddOverlay(archive);
         }
@@ -198,14 +227,69 @@ public class AssetManager
 
         UnloadAssets();
     }
+
+    /// <summary>Register an archive for loading on the first resource request. Later files are overlays.</summary>
+    public void RegisterArchive(string path)
+    {
+        path = Path.GetFullPath(path);
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException("Missing archive", path);
+        }
+        var name = Path.GetFileNameWithoutExtension(path);
+        if (!_archiveSources.TryGetValue(name, out var paths))
+        {
+            paths = [];
+            _archiveSources.Add(name, paths);
+        }
+        paths.Add(path);
+        UnloadAssets();
+    }
+
+    internal GArchive? GetLoadedArchive(string name)
+    {
+        if (_archiveSources.TryGetValue(name, out var paths))
+        {
+            // Parse all pending overlays before committing so a failed read cannot partially apply them.
+            GArchive? pending = null;
+            foreach (var path in paths)
+            {
+                var archive = GArchive.Read(path);
+                if (pending == null)
+                {
+                    pending = archive;
+                }
+                else
+                {
+                    pending.AddOverlay(archive);
+                }
+            }
+            if (pending != null)
+            {
+                if (_archives.TryGetValue(name, out var previous))
+                {
+                    previous.AddOverlay(pending);
+                }
+                else
+                {
+                    _archives.Add(name, pending);
+                }
+            }
+            _archiveSources.Remove(name);
+        }
+        return _archives.GetValueOrDefault(name);
+    }
+
     public void UnloadArchive(string name)
     {
         _archives.Remove(name);
+        _archiveSources.Remove(name);
         UnloadAssets();
     }
     public void UnloadArchives()
     {
         _archives.Clear();
+        _archiveSources.Clear();
         UnloadAssets();
     }
     public void UnloadAsset(string name)
@@ -230,6 +314,7 @@ public class AssetManager
 
     public void RegisterLoader(string type, Func<AssetInfo, Asset?> loader)
     {
+        _customLoaders[type] = loader;
         _loaders[type] = loader;
         UnloadAssets();
     }
@@ -306,7 +391,7 @@ public class AssetManager
             }
         }
         var separator = name.IndexOf('/');
-        return separator >= 0 && _archives.TryGetValue(name[..separator], out var archive) ? archive.GetValueOrDefault(name) : null;
+        return separator >= 0 ? GetLoadedArchive(name[..separator])?.GetValueOrDefault(name) : null;
     }
 
     public bool FileExists(string? path)
@@ -323,7 +408,7 @@ public class AssetManager
         }
 
         var separator = name.IndexOf('/');
-        return separator >= 0 && _archives.TryGetValue(name[..separator], out var archive) && archive.ContainsKey(name);
+        return separator >= 0 && GetLoadedArchive(name[..separator]) is GArchive archive && archive.ContainsKey(name);
     }
     public JsonNode? LoadJson(string? path)
     {
@@ -340,7 +425,7 @@ public class AssetManager
         var prefix = directory.Replace('\\', '/').TrimEnd('/') + "/";
         var files = new SortedSet<string>(StringComparer.Ordinal);
         var separator = prefix.IndexOf('/');
-        if (_archives.TryGetValue(prefix[..separator], out var archive))
+        if (GetLoadedArchive(prefix[..separator]) is GArchive archive)
         {
             foreach (var name in archive.Keys.Where(name => name.StartsWith(prefix, StringComparison.Ordinal)))
             {

@@ -39,6 +39,11 @@ public class CsvAsset : JsonAsset
         return string.Join("\n", rows.Select(row => string.Join(",", row.Select(Cell))));
     }
 
+    public override Asset CompileSource(Stream stream)
+    {
+        return new CsvAsset(Compilation.CsvCompiler.Compile(Create<TextAsset>(stream).Text, _name), _name);
+    }
+
     private static string Cell(JsonNode? node)
     {
         var text = node is JsonValue value && value.TryGetValue<string>(out var str) ? str : node?.ToJsonString() ?? "";
