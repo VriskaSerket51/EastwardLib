@@ -1,4 +1,5 @@
-﻿using System.Text;
+using System.Text;
+using EastwardLib.Utils;
 
 namespace EastwardLib.Assets;
 
@@ -10,33 +11,27 @@ public class TextAsset : Asset
     {
     }
 
-    public string Text => _text ?? string.Empty;
-
     public TextAsset(string text)
     {
         _text = text;
     }
 
+    public string Text => _text ?? string.Empty;
+
     public override byte[] Encode()
     {
-        if (_text == null)
-        {
-            throw new Exception("Text Data is NULL!!!");
-        }
-
-        return Encoding.UTF8.GetBytes(_text);
+        return Encoding.UTF8.GetBytes(_text ?? throw new InvalidOperationException("No text data loaded"));
     }
 
-    public override void Decode(Stream s)
+    public override void Decode(Stream stream)
     {
-        using StreamReader sr = new StreamReader(s);
-        _text = sr.ReadToEnd();
+        using var reader = new StreamReader(stream, Encoding.UTF8, true, 1024, true);
+        _text = reader.ReadToEnd();
     }
 
     public override void SaveTo(string path)
     {
-        PrepareDirectory(path);
-
-        File.WriteAllText(path, _text);
+        path = SafePath.PrepareFile(path);
+        File.WriteAllBytes(path, Encode());
     }
 }

@@ -1,5 +1,7 @@
 bin/
 obj/
+/build/
+__pycache__/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/

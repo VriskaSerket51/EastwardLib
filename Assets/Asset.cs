@@ -1,41 +1,21 @@
-﻿using EastwardLib.MetaData;
-
 namespace EastwardLib.Assets;
 
 public abstract class Asset
 {
     public static T Create<T>(byte[] data) where T : Asset, new()
     {
-        using MemoryStream ms = new MemoryStream(data);
-
-        T asset = new T();
-        asset.Decode(ms);
-
-        return asset;
+        using var stream = new MemoryStream(data);
+        return Create<T>(stream);
     }
 
-    public static T Create<T>(Stream s) where T : Asset, new()
+    public static T Create<T>(Stream stream) where T : Asset, new()
     {
-        T asset = new T();
-        asset.Decode(s);
-
+        var asset = new T();
+        asset.Decode(stream);
         return asset;
     }
 
     public abstract byte[] Encode();
-
-    public abstract void Decode(Stream s);
-
-    protected void PrepareDirectory(string path)
-    {
-        string? directory = Path.GetDirectoryName(path);
-        if (directory == null)
-        {
-            throw new Exception();
-        }
-
-        Directory.CreateDirectory(directory);
-    }
-
+    public abstract void Decode(Stream stream);
     public abstract void SaveTo(string path);
 }

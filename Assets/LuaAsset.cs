@@ -1,23 +1,47 @@
-﻿namespace EastwardLib.Assets;
+using System.Text;
+using EastwardLib.Utils;
 
-public class LuaAsset : Asset
+namespace EastwardLib.Assets;
+
+public class LuaAsset : BinaryAsset
 {
+    private readonly Func<byte[], string>? _decompiler;
+    private string? _source;
+    public bool IsBytecode => Encode().AsSpan().StartsWith(new byte[] { 0x1b, 0x4c, 0x4a });
+
     public LuaAsset()
     {
     }
 
-    public override byte[] Encode()
+    public LuaAsset(byte[] bytes, Func<byte[], string>? decompiler = null) : base(bytes)
     {
-        throw new NotImplementedException();
+        _decompiler = decompiler;
     }
 
-    public override void Decode(Stream s)
+    public override void Decode(Stream stream)
     {
-        throw new NotImplementedException();
+        base.Decode(stream);
+        _source = null;
     }
 
-    public override void SaveTo(string path)
+    /// <summary>Decompile only when editor source is explicitly requested.</summary>
+    public string GetSource()
     {
-        throw new NotImplementedException();
+        if (_source != null)
+        {
+            return _source;
+        }
+
+        var bytes = Encode();
+        _source = IsBytecode
+            ? (_decompiler ?? throw new NotSupportedException("Configure AssetManager.LuaDecompiler to extract LuaJIT source"))(bytes)
+            : Encoding.UTF8.GetString(bytes);
+        return _source;
+    }
+
+    public void SaveSourceTo(string path)
+    {
+        path = SafePath.PrepareFile(path);
+        File.WriteAllText(path, GetSource());
     }
 }

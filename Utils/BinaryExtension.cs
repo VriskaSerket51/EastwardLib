@@ -1,43 +1,42 @@
-﻿using System.Text;
+using System.Text;
 
 namespace EastwardLib.Utils;
 
 public static class BinaryExtension
 {
-    public static string ReadZString(this BinaryReader br)
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    public static string ReadZString(this BinaryReader reader)
     {
-        StringBuilder sb = new StringBuilder(10);
-        char c;
-        while ((c = br.ReadChar()) != 0)
+        using var bytes = new MemoryStream();
+        byte value;
+        while ((value = reader.ReadByte()) != 0)
         {
-            sb.Append(c);
+            bytes.WriteByte(value);
         }
 
-        return sb.ToString();
+        return StrictUtf8.GetString(bytes.ToArray());
     }
-    
-    public static void WriteZString(this BinaryWriter bw, string s)
+
+    public static void WriteZString(this BinaryWriter writer, string value)
     {
-        foreach (var c in s.ToCharArray())
+        if (value.Contains('\0'))
         {
-            bw.Write(c);
+            throw new ArgumentException("NUL in archive name", nameof(value));
         }
-        bw.Write('\0');
+
+        writer.Write(StrictUtf8.GetBytes(value));
+        writer.Write((byte)0);
     }
 
     public static byte[] RemovePadding(this byte[] data)
     {
-        int length = data.Length;
-        for (int i = data.Length - 1; i >= 0; i--)
+        var length = data.Length;
+        while (length > 0 && data[length - 1] == 0)
         {
-            if (data[i] != 0)
-            {
-                break;
-            }
-
             length--;
         }
 
-        return data.Take(length).ToArray();
+        return data[..length];
     }
 }

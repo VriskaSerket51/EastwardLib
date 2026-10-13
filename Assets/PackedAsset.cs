@@ -1,4 +1,5 @@
-﻿using MessagePack;
+using EastwardLib.Utils;
+using MessagePack;
 
 namespace EastwardLib.Assets;
 
@@ -27,7 +28,7 @@ public class PackedAsset : Asset
 
     public override void SaveTo(string path)
     {
-        PrepareDirectory(path);
+        path = SafePath.PrepareFile(path);
 
         var json = MessagePackSerializer.SerializeToJson(_obj);
         File.WriteAllText(path, json);

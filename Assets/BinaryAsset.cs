@@ -1,4 +1,6 @@
-﻿namespace EastwardLib.Assets;
+using EastwardLib.Utils;
+
+namespace EastwardLib.Assets;
 
 public class BinaryAsset : Asset
 {
@@ -15,29 +17,19 @@ public class BinaryAsset : Asset
 
     public override byte[] Encode()
     {
-        if (_data == null)
-        {
-            throw new InvalidOperationException("You should Encode() after Decode()");
-        }
-
-        return _data;
+        return _data ?? throw new InvalidOperationException("No binary data loaded");
     }
 
-    public override void Decode(Stream s)
+    public override void Decode(Stream stream)
     {
-        using BinaryReader br = new BinaryReader(s);
-        _data = br.ReadBytes((int)s.Length);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        _data = buffer.ToArray();
     }
 
     public override void SaveTo(string path)
     {
-        if (_data == null)
-        {
-            return;
-        }
-
-        PrepareDirectory(path);
-
-        File.WriteAllBytes(path, _data);
+        path = SafePath.PrepareFile(path);
+        File.WriteAllBytes(path, Encode());
     }
 }

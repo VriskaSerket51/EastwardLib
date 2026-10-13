@@ -1,43 +1,45 @@
-﻿namespace EastwardLib.Assets;
+using EastwardLib.Utils;
+
+namespace EastwardLib.Assets;
 
 public class PackageAsset : Asset
 {
     protected readonly Dictionary<string, Asset> Children;
+    public IReadOnlyDictionary<string, Asset> Items => Children;
 
     public PackageAsset(Dictionary<string, Asset> assets)
     {
         Children = assets;
     }
 
-    public void AddChild(string assetName, Asset asset)
+    public void AddChild(string name, Asset asset)
     {
-        Children.Add(assetName, asset);
+        Children.Add(name, asset);
     }
 
     public void AddChildren(Dictionary<string, Asset> assets)
     {
-        foreach (var (key, value) in assets)
+        foreach (var (name, asset) in assets)
         {
-            Children.Add(key, value);
+            AddChild(name, asset);
         }
     }
 
     public override byte[] Encode()
     {
-        throw new Exception("You cannot encode/decode PackageAsset!!!");
+        throw new NotSupportedException("A package contains multiple resource files; encode its items individually");
     }
 
-    public override void Decode(Stream s)
+    public override void Decode(Stream stream)
     {
-        throw new Exception("You cannot encode/decode PackageAsset!!!");
+        throw new NotSupportedException("Load package items through AssetManager");
     }
 
     public override void SaveTo(string path)
     {
-        PrepareDirectory(path);
-        foreach (var (key, value) in Children)
+        foreach (var (name, asset) in Children)
         {
-            value.SaveTo(Path.Combine(path, key));
+            asset.SaveTo(SafePath.ResolveWithin(path, name));
         }
     }
 }

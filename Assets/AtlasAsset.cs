@@ -1,51 +1,48 @@
-﻿using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
-using SimpleJSON;
+using System.Text.Json.Nodes;
+using EastwardLib.Utils;
 
 namespace EastwardLib.Assets;
 
 public class AtlasAsset : PackageAsset
 {
-    private readonly Dictionary<string, byte[]> _images;
+    private readonly Dictionary<string, byte[]> _images = new(StringComparer.Ordinal);
 
     public AtlasAsset(Dictionary<string, Asset> assets) : base(assets)
     {
-        var atlas = (TextAsset)assets["atlas.json"];
-        assets.Remove("atlas.json");
-
-        JSONNode atlasNode = JSONNode.Parse(atlas.Text);
-        var atlasesNode = atlasNode["atlases"].AsArray;
-        Dictionary<int, Image> atlases = new Dictionary<int, Image>(atlasesNode.Count);
-        for (var i = 0; i < atlasesNode.Count; i++)
+        var definition = JsonNode.Parse(((TextAsset)assets["atlas.json"]).Text) ?? throw new InvalidDataException("Missing atlas index");
+        var atlases = definition["atlases"]!.AsArray().Select(item =>
         {
-            var value = atlasesNode[i];
-            string name = value["name"].Value;
-            var hmg = (HmgAsset)Children[name];
-            using MemoryStream ms = new MemoryStream();
-            hmg.SaveTo(ms);
-            atlases.Add(i, Image.FromStream(ms));
-        }
+            var asset = assets[item!["name"]!.GetValue<string>()];
+            if (asset is HmgAsset hmg)
+            {
+                return hmg.Image!;
+            }
 
-        var itemsNode = atlasNode["items"].AsArray;
-        _images = new(itemsNode.Count);
-        foreach (var (_, value) in itemsNode)
+            using var stream = new MemoryStream(asset.Encode());
+            return RgbaImage.Load(stream);
+        }).ToArray();
+        foreach (var item in definition["items"]!.AsArray())
         {
-            string name = value["name"].Value.Replace("\\/", "/");
+            var name = item!["name"]!.GetValue<string>();
+            var rect = item["rect"]!.AsArray().Select(value => value!.GetValue<int>()).ToArray();
+            var atlas = item["atlas"]!.GetValue<int>();
+            if (rect.Length != 4 || atlas < 0 || atlas >= atlases.Length)
+            {
+                throw new InvalidDataException("Invalid atlas item");
+            }
 
-            int atlasIdx = value["atlas"].AsInt;
-            var rectNode = value["rect"];
-            Rectangle rect = new Rectangle(rectNode[0].AsInt, rectNode[1].AsInt, rectNode[2].AsInt, rectNode[3].AsInt);
-            using var bitmap = new Bitmap(rect.Width, rect.Height);
-            using var g = Graphics.FromImage(bitmap);
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(atlases[atlasIdx], rect with { X = 0, Y = 0 }, rect, GraphicsUnit.Pixel);
-            using MemoryStream ms = new MemoryStream();
-            bitmap.Save(ms, ImageFormat.Png);
-            _images.Add(name, ms.ToArray());
+            _images.Add(name, atlases[atlas].Crop(rect[0], rect[1], rect[2], rect[3]).ToPng());
         }
     }
 
     public byte[] this[string name] => _images[name];
+    public override void SaveTo(string path)
+    {
+        foreach (var (name, data) in _images)
+        {
+            var target = SafePath.ResolveWithin(path, name);
+            target = SafePath.PrepareFile(target);
+            File.WriteAllBytes(target, data);
+        }
+    }
 }
