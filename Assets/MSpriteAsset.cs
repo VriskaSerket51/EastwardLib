@@ -128,9 +128,35 @@ public class MSpriteAsset : JsonAsset
         }
     }
 
+    public (int Left, int Top, int Width, int Height) GetPreviewBounds()
+    {
+        var left = 0;
+        var top = 0;
+        var right = 1;
+        var bottom = 1;
+        foreach (var (_, frame) in Data!["frames"]!.AsObject())
+        {
+            foreach (var part in frame!["parts"]!.AsArray())
+            {
+                var rect = Data["modules"]![part![0]!.ToString()]!["rect"]!;
+                var x = Coordinate(part[1]);
+                var y = Coordinate(part[2]);
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, checked(x + Coordinate(rect[2])));
+                bottom = Math.Max(bottom, checked(y + Coordinate(rect[3])));
+            }
+        }
+        return (left, top, checked(right - left), checked(bottom - top));
+    }
+
+    private static int Coordinate(JsonNode? value)
+    {
+        return checked((int)double.Parse(value!.ToString(), System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     public RgbaImage RenderFrame(string name, int index)
     {
-        static int Number(JsonNode? value) => checked((int)double.Parse(value!.ToString(), System.Globalization.CultureInfo.InvariantCulture));
         var animation = Data!["anims"]!.AsObject().Select(pair => pair.Value!).FirstOrDefault(value => value["name"]?.ToString() == name)
             ?? throw new InvalidDataException("Missing sprite animation: " + name);
         var sequence = animation["seq"]!.AsArray();
@@ -145,16 +171,15 @@ public class MSpriteAsset : JsonAsset
         var parts = frame["parts"]!.AsArray().Select(part =>
         {
             var module = Data["modules"]![part![0]!.ToString()]!;
-            var rect = module["rect"]!.AsArray().Select(Number).ToArray();
+            var rect = module["rect"]!.AsArray().Select(Coordinate).ToArray();
             var atlas = module["atlas"]?.ToString();
             var image = atlas != null ? atlases[atlas] : atlases.Count == 1 ? atlases.Values.First() : throw new InvalidDataException("Missing sprite atlas");
-            return (Image: image.Crop(rect[0], rect[1], rect[2], rect[3]), X: Number(part[1]) + (entry.Count > 2 ? Number(entry[2]) : 0), Y: Number(part[2]) + (entry.Count > 3 ? Number(entry[3]) : 0));
+            return (Image: image.Crop(rect[0], rect[1], rect[2], rect[3]), X: Coordinate(part[1]), Y: Coordinate(part[2]));
         }).ToArray();
-        var left = parts.Select(part => part.X).Append(0).Min();
-        var top = parts.Select(part => part.Y).Append(0).Min();
-        var right = parts.Select(part => checked(part.X + part.Image.Width)).Append(1).Max();
-        var bottom = parts.Select(part => checked(part.Y + part.Image.Height)).Append(1).Max();
-        var result = new RgbaImage(checked(right - left), checked(bottom - top), new byte[checked((right - left) * (bottom - top) * 4)]);
+        // The runtime uses part positions relative to a shared origin. Sequence offsets
+        // are not linked by MSprite.lua; frame metadata origins are already baked into parts.
+        var (left, top, width, height) = GetPreviewBounds();
+        var result = new RgbaImage(width, height, new byte[checked(width * height * 4)]);
         foreach (var part in parts)
         {
             for (var y = 0; y < part.Image.Height; y++)

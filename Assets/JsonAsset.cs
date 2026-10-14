@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using EastwardLib.Utils;
@@ -47,9 +48,14 @@ public class JsonAsset : Asset
         return new JsonAsset(JsonNode.Parse(stream, documentOptions: new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }), _packed);
     }
 
+    public string ToJson(bool indented = true)
+    {
+        return Data?.ToJsonString(new JsonSerializerOptions { WriteIndented = indented, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) ?? "null";
+    }
+
     public override void SaveTo(string path)
     {
         path = SafePath.PrepareFile(path);
-        File.WriteAllText(path, Data?.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) ?? "null");
+        File.WriteAllText(path, ToJson());
     }
 }

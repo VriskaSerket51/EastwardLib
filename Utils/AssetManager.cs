@@ -514,7 +514,7 @@ public class AssetManager
         _loaders["com_script"] = info => new TextAsset(Encoding.UTF8.GetString(RequireFile(info.ObjectFiles.GetValueOrDefault("script"))));
         _loaders["fsm_scheme"] = info => new TextAsset(Encoding.UTF8.GetString(RequireFile(info.ObjectFiles.GetValueOrDefault("def"))));
         _loaders["font_ttf"] = info => new BinaryAsset(RequireFile(info.ObjectFiles.GetValueOrDefault("font")));
-        _loaders["font_bmfont"] = info => new TextAsset(Encoding.UTF8.GetString(RequireFile(info.ObjectFiles.GetValueOrDefault("font"))));
+        _loaders["font_bmfont"] = info => new BitmapFontAsset(this, info);
         _loaders["lut_texture"] = info => new BinaryAsset(RequireFile(info.ObjectFiles.GetValueOrDefault("texture")));
         _loaders["proto"] = LoadDefinition;
         foreach (var type in new[] { "fsm_scheme", "quest_scheme", "scene_portal_graph", "story_graph" })
@@ -525,6 +525,8 @@ public class AssetManager
         _loaders["data_csv"] = info => new CsvAsset(RequireJson(info.ObjectFiles.GetValueOrDefault("data")), info.Name);
         _loaders["data_xls"] = info => new WorkbookAsset(RequireJson(info.ObjectFiles.GetValueOrDefault("data")), RequireJson(info.ObjectFiles.GetValueOrDefault("meta_data")));
         _loaders["data_sheet"] = info => new JsonAsset((LoadAsset(info.Parent) as WorkbookAsset)?.Data?[info.Name] ?? throw new InvalidDataException("Missing workbook sheet"));
+        _loaders["multi_texture"] = info => new MultiTextureAsset(this, Encoding.UTF8.GetString(RequireFile(info.ObjectFiles["data"])));
+        _loaders["deck2d"] = info => new LegacyDeckPackAsset(this, Encoding.UTF8.GetString(RequireFile(info.ObjectFiles["def"])));
         _loaders["texture"] = LoadTexture;
         _loaders["texture_pack"] = info => new TexturePackAsset(GetChildren(info.AssetName).Where(child => child.Type == "texture").ToDictionary(child => child.Name, child => ((HmgAsset)LoadAsset(child.AssetName)!).Image!, StringComparer.Ordinal));
         _loaders["scene"] = info => new SceneAsset(this, info);
@@ -533,7 +535,7 @@ public class AssetManager
         _loaders["lua"] = info => new LuaAsset(RequireFile(_scriptLibrary.GetValueOrDefault(info.AssetName)), bytes =>
             (LuaDecompiler ?? throw new NotSupportedException("Configure AssetManager.LuaDecompiler to extract LuaJIT source"))(bytes));
         _loaders["msprite"] = info => new MSpriteAsset(this, info);
-        _loaders["deck2d.msprite_seq"] = info => new JsonAsset(((MSpriteAsset)LoadAsset(info.Parent)!).FindAnimation(info.Name));
+        _loaders["deck2d.msprite_seq"] = info => new SpriteSequenceAsset((MSpriteAsset)LoadAsset(info.Parent)!, info.Name);
         foreach (var type in new[] { "deck_pack", "deck_pack_raw" })
         {
             _loaders[type] = LoadDeckPack;
@@ -545,7 +547,7 @@ public class AssetManager
         }
 
         _loaders["named_tileset_pack"] = LoadTilesetPack;
-        _loaders["named_tileset"] = info => new JsonAsset(FindNamed(((PackageAsset)LoadAsset(info.Parent)!).Items["tileset.json"], "themes", info.Name));
+        _loaders["named_tileset"] = info => { var pack = (TilesetPackAsset)LoadAsset(info.Parent)!; return new NamedTilesetAsset(FindNamed(pack.Items["tileset.json"], "themes", info.Name), ((HmgAsset)pack.Items["atlas.png"]).Image!); };
         _loaders["locale_pack"] = info => new LocalePackAsset(this, info);
         _loaders["fs_project"] = info => LoadPackage(info.ObjectFiles["data"]);
         _loaders["fs_folder"] = info => new JsonAsset(new JsonArray(GetChildren(info.AssetName).Select(child => (JsonNode)new JsonObject { ["name"] = child.Name, ["path"] = child.AssetName, ["type"] = child.Type }).ToArray()));
@@ -597,21 +599,32 @@ public class AssetManager
         var items = new Dictionary<string, Asset>(StringComparer.Ordinal) { ["decks.json"] = new JsonAsset(RequireJson(path + "/decks.json")) };
         foreach (var name in new[] { "decks", "decks_n" })
         {
-            if (LoadFile(path + "/" + name + ".hmg") is byte[] bytes)
+            var bytes = new[] { "", ".tex", ".hmg", ".png" }.Select(extension => LoadFile(path + "/" + name + extension)).FirstOrDefault(data => data != null);
+            if (bytes != null)
             {
                 items.Add(name + ".png", new HmgAsset(DecodeImage(bytes)));
             }
         }
 
-        return new PackageAsset(items);
+        return new DeckPackAsset(items);
     }
 
     private Asset LoadDeckItem(AssetInfo info)
     {
         var parent = LoadAsset(info.Parent);
+        if (parent is LegacyDeckPackAsset legacy)
+        {
+            return legacy.GetDeck(info.Name);
+        }
+
+        if (parent is DeckPackAsset deckPack)
+        {
+            return deckPack.GetDeck(info.Name);
+        }
+
         if (parent is PackageAsset pack)
         {
-            return new JsonAsset(FindNamed(pack.Items["decks.json"], "decks", info.Name));
+            return new DeckAsset(FindNamed(pack.Items["decks.json"], "decks", info.Name), pack.Items.Where(pair => pair.Value is HmgAsset).ToDictionary(pair => pair.Key == "decks_n.png" ? "Normal" : "Color", pair => ((HmgAsset)pair.Value).Image!, StringComparer.Ordinal));
         }
 
         if (parent is TextAsset text)
