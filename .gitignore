@@ -16,12 +16,23 @@ build/
 *.iml
 _ReSharper.Caches/
 
-# Native build output
+# Native build output and local CMake settings
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
+CMakeUserPresets.json
 cmake_install.cmake
 install_manifest.txt
+.ninja_deps
+.ninja_log
+build.ninja
+rules.ninja
+
+# Generated test results
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
 
 # Python caches
 __pycache__/
