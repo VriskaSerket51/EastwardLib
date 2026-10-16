@@ -126,7 +126,26 @@ public class GArchive : Dictionary<string, byte[]>
 
             if (entry.Compression == 2)
             {
-                bytes = decompressor.Unwrap(bytes, entry.Size).ToArray();
+                if (entry.Size > Array.MaxLength)
+                {
+                    throw new InvalidDataException($"Archive entry exceeds supported size: {entry.Name}");
+                }
+                // Streaming Zstd frames may omit their content size. The inferred bound can
+                // exceed the actual length, so decode into the archive's exact declared buffer.
+                var decoded = new byte[entry.Size];
+                try
+                {
+                    var decodedCount = decompressor.Unwrap(bytes.AsSpan(), decoded.AsSpan());
+                    if (decodedCount != entry.Size)
+                    {
+                        throw new InvalidDataException($"Archive size mismatch: {entry.Name}");
+                    }
+                }
+                catch (ZstdException error)
+                {
+                    throw new InvalidDataException($"Invalid compressed archive entry: {entry.Name}", error);
+                }
+                bytes = decoded;
             }
 
             if (bytes.Length != entry.Size)
