@@ -146,10 +146,13 @@ public sealed class AssetCompiler(AssetManager manager)
                     break;
                 case "locale_pack":
                     var locale = (LocalePackAsset)edited;
-                    Put(output, Role(info, "config"), new JsonAsset(locale.Config).Encode());
+                    var originalLocale = (LocalePackAsset)original;
+                    Put(output, Role(info, "config"), JsonNode.DeepEquals(locale.Config, originalLocale.Config) ? manager.RequireFile(Role(info, "config")) : new JsonAsset(locale.Config).Encode());
                     foreach (var (language, table) in locale.Languages)
                     {
-                        Put(output, Role(info, "data") + "/" + language, Encoding.UTF8.GetBytes("return " + LocaleCompiler.WriteLua(table)));
+                        var path = Role(info, "data") + "/" + language;
+                        var unchanged = originalLocale.Languages.TryGetValue(language, out var originalTable) && JsonNode.DeepEquals(table, originalTable);
+                        Put(output, path, unchanged ? manager.RequireFile(path) : Encoding.UTF8.GetBytes("return " + LocaleCompiler.WriteLua(table)));
                     }
 
                     break;

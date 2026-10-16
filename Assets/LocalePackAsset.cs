@@ -39,6 +39,11 @@ public class LocalePackAsset : Asset
         }
     }
 
+    public LocalePackAsset WithLanguages(IReadOnlyDictionary<string, JsonNode> languages)
+    {
+        return new LocalePackAsset(Config, languages.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+    }
+
     public override Asset CompileSource(string path)
     {
         var configPath = Path.Combine(path, "locale_pack.json");
@@ -72,6 +77,10 @@ public class LocalePackAsset : Asset
                 var po = new StringBuilder("msgid \"\"\nmsgstr \"\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\n");
                 foreach (var (id, value) in messages!.AsObject())
                 {
+                    if (value?.ToString() == "")
+                    {
+                        po.Append("#, eastward-empty\n");
+                    }
                     po.Append("msgid ").Append(Quote(id)).Append("\nmsgstr ").Append(Quote(value?.ToString() ?? "")).Append("\n\n");
                 }
 

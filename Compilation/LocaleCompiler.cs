@@ -10,10 +10,12 @@ public static class LocaleCompiler
     public static JsonObject ReadPo(string source)
     {
         var result = new JsonObject();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         string? field = null;
         var fuzzy = false;
         var obsolete = false;
+        var explicitEmpty = false;
         void Commit()
         {
             if (values.TryGetValue("msgid", out var id) && id.Length > 0 && !obsolete)
@@ -23,20 +25,21 @@ public static class LocaleCompiler
                     throw new NotSupportedException("Contextual PO entries are not supported by the locale table");
                 }
 
-                if (result.ContainsKey(id))
+                if (!seen.Add(id))
                 {
                     throw new InvalidDataException("Duplicate PO message: " + id);
                 }
 
-                if (!fuzzy && values.TryGetValue("msgstr", out var text) && text.Length > 0)
+                if (!fuzzy && values.TryGetValue("msgstr", out var text) && (text.Length > 0 || explicitEmpty))
                 {
-                    result[id] = text.Replace("\r", "");
+                    result[id] = text;
                 }
             }
             values.Clear();
             field = null;
             fuzzy = false;
             obsolete = false;
+            explicitEmpty = false;
         }
         foreach (var raw in source.Replace("\r\n", "\n").Split('\n'))
         {
@@ -58,6 +61,10 @@ public static class LocaleCompiler
                     fuzzy = true;
                 }
 
+                if (line.StartsWith("#,", StringComparison.Ordinal) && line[2..].Split(',').Any(flag => flag.Trim() == "eastward-empty"))
+                {
+                    explicitEmpty = true;
+                }
                 continue;
             }
             if (line.StartsWith("msgid_plural", StringComparison.Ordinal) || line.StartsWith("msgstr[", StringComparison.Ordinal))
