@@ -1,4 +1,3 @@
-using System.Text.Json;
 using EastwardLib.Assets;
 using EastwardLib.MetaData;
 
@@ -64,7 +63,7 @@ public sealed class ProjectReconstructor(AssetManager manager)
                 throw new ArgumentException("Source project must be outside the input directory");
             }
         }
-        if (Directory.Exists(root) || File.Exists(root) || File.Exists(root + ".recovery.json"))
+        if (Directory.Exists(root) || File.Exists(root))
         {
             throw new IOException("Use a fresh project output directory");
         }
@@ -166,7 +165,16 @@ public sealed class ProjectReconstructor(AssetManager manager)
             }
         }
 
-        new TextAsset(JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase })).SaveTo(root + ".recovery.json");
+        var metadata = new SourceProjectMetadata();
+        foreach (var (name, entry) in report.Restored)
+        {
+            metadata.Assets.Add(name, entry.Path);
+        }
+        foreach (var (original, replacement) in report.PathRemappings)
+        {
+            metadata.PathRemappings.Add(original, replacement);
+        }
+        metadata.SaveTo(root);
         return report;
     }
 

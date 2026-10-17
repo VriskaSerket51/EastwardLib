@@ -201,15 +201,10 @@ public sealed class AssetCompiler(AssetManager manager)
 
     public IReadOnlyDictionary<string, byte[]> CompileProject(string sourceDirectory, Func<AssetInfo, bool>? filter = null)
     {
-        var report = ReadJson(Path.GetFullPath(sourceDirectory) + ".recovery.json");
-        if (report["format"]?.ToString() != "eastward-source-restoration")
-        {
-            throw new InvalidDataException("Invalid source recovery report");
-        }
-
-        var mappings = (report["pathRemappings"] as JsonObject ?? []).ToDictionary(pair => pair.Value!.ToString(), pair => pair.Key, StringComparer.Ordinal);
+        var metadata = SourceProjectMetadata.Read(Path.GetFullPath(sourceDirectory));
+        var mappings = metadata.PathRemappings.ToDictionary(pair => pair.Value, pair => pair.Key, StringComparer.Ordinal);
         var sources = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (name, entry) in report["restored"]!.AsObject())
+        foreach (var (name, path) in metadata.Assets)
         {
             var info = manager.Assets[name];
             if (info.Type == "folder" || info.FilePath == null || filter != null && !filter(info))
@@ -217,7 +212,7 @@ public sealed class AssetCompiler(AssetManager manager)
                 continue;
             }
 
-            sources.Add(name, SafePath.ResolveWithin(sourceDirectory, entry!["path"]!.ToString()));
+            sources.Add(name, SafePath.ResolveWithin(sourceDirectory, path));
         }
         return Compile(sources, mappings);
     }

@@ -2,7 +2,7 @@
 
 Usage: python tests/audit_source_project.py OUTPUT GII_CHECKOUT
 Requires Pillow, six, PyYAML and Gii's bundled xlrd/psd_tools.
-Writes generated FSM comparison inputs beside the recovery report.
+Writes generated FSM comparison inputs beside the source project.
 """
 
 import contextlib
@@ -32,7 +32,7 @@ from psd_tools import PSDImage
 import xlrd
 from import_quest_graph import import_quest_graph
 
-report = json.loads(pathlib.Path(str(root) + ".recovery.json").read_text(encoding="utf-8"))
+report = json.loads((root / ".eastward-project.json").read_text(encoding="utf-8"))
 counts = {"aseFiles": 0, "frames": 0, "tags": 0, "psdFiles": 0, "psdLayers": 0, "workbooks": 0, "sheets": 0, "questGraphs": 0, "portalGraphs": 0, "fsmGraphs": 0}
 errors = {}
 comparisons = []

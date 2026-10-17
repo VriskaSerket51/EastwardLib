@@ -377,19 +377,19 @@ static void AuditCompilation(string sourceRoot, string[] resourceRoots)
     manager.RootDirectory = resourceRoots[0];
     foreach (var directory in resourceRoots)
         foreach (var file in Directory.EnumerateFiles(directory, "*.g", SearchOption.AllDirectories)) manager.LoadArchive(GArchive.Read(file));
-    var report = JsonNode.Parse(File.ReadAllText(sourceRoot + ".recovery.json"))!;
-    var mappings = report["pathRemappings"]!.AsObject().ToDictionary(pair => pair.Value!.ToString(), pair => pair.Key);
+    var metadata = SourceProjectMetadata.Read(sourceRoot);
+    var mappings = metadata.PathRemappings.ToDictionary(pair => pair.Value, pair => pair.Key);
     var compiler = new AssetCompiler(manager);
     var failures = new List<string>();
     var counts = new Dictionary<string, int>();
     var selectedTypes = Environment.GetEnvironmentVariable("EASTWARD_COMPILE_TYPES")?.Split(',').ToHashSet(StringComparer.Ordinal);
-    foreach (var (name, entry) in report["restored"]!.AsObject())
+    foreach (var (name, path) in metadata.Assets)
     {
         if (!manager.Assets.TryGetValue(name, out var info) || info.Type == "folder" || info.FilePath == null) continue;
         if (selectedTypes != null && !selectedTypes.Contains(info.Type)) continue;
         try
         {
-            var resources = compiler.Compile(new Dictionary<string, string> { [name] = SafePath.ResolveWithin(sourceRoot, entry!["path"]!.ToString()) }, mappings);
+            var resources = compiler.Compile(new Dictionary<string, string> { [name] = SafePath.ResolveWithin(sourceRoot, path) }, mappings);
             Check(resources.Count > 0, "No compiled resources");
             counts[info.Type] = counts.GetValueOrDefault(info.Type) + 1;
         }
@@ -865,6 +865,16 @@ static void SourceProject()
     {
         var report = new ProjectReconstructor(manager).SaveTo(output);
         Check(report.Restored.Count == 2 && report.VirtualAssets == 1 && report.Unavailable.Count == 0 && report.PathRemappings.Count == 1, "Project source coverage differs");
+        var metadata = SourceProjectMetadata.Read(output);
+        Check(metadata.Assets.Count == 2 && metadata.PathRemappings.Count == 1, "Project metadata mappings differ");
+        var data = JsonNode.Parse(File.ReadAllText(Path.Combine(output, SourceProjectMetadata.FileName)))!.AsObject();
+        Check(data.Count == 4 && !File.Exists(output + ".recovery.json"), "Project metadata contains a recovery report");
+        var compiled = new AssetCompiler(manager).CompileProject(output, info => info.Type == "proto");
+        Check(JsonNode.Parse(compiled["fixture/proto"])!["deck"]!.ToString() == "a.decks.psd/idle:right", "Project compilation did not restore original references");
+        data["assets"]!["scene.proto"] = "../outside.proto";
+        File.WriteAllText(Path.Combine(output, SourceProjectMetadata.FileName), data.ToJsonString());
+        Reject(() => SourceProjectMetadata.Read(output));
+        metadata.SaveTo(output);
         Check(File.Exists(Path.Combine(output, "game/asset/a.deckpack/decks.png")), "Deckpack pixels missing");
         Check(JsonNode.Parse(File.ReadAllText(Path.Combine(output, "game/asset/scene.proto")))!["deck"]!.ToString() == "a.deckpack/idle:right", "Virtual identifier was escaped or not remapped");
         try
@@ -882,7 +892,7 @@ static void SourceProject()
             Directory.Delete(output, true);
         }
 
-        File.Delete(output + ".recovery.json");
+
     }
 }
 
