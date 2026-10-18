@@ -1,6 +1,7 @@
 EastwardLib
 
-GNU General Public License version 3. See LICENSE.
+Project code in this revision is licensed under MIT. See LICENSE.
+Earlier releases retain the licenses under which they were distributed.
 
 Third-party components retain their own licenses and copyright notices.
 The resolved NuGet dependencies and license texts are listed in licenses/nuget/packages.json.
