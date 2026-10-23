@@ -2,7 +2,7 @@
 
 English | [한국어](README.ko.md)
 
-Use `EastwardLib.dll` to work with Eastward assets and GArchives.
+An unofficial .NET library for working with Eastward assets and GArchives.
 
 For CLI tools, see [EastwardPacker](https://github.com/VriskaSerket51/EastwardPacker).
 
@@ -37,7 +37,7 @@ g.ExtractTo("./locale_extracted");
 
 ### AssetManager
 
-Use the index to extract assets with their original names:
+Extract assets using the names and paths recorded in the index:
 
 ```cs
 using EastwardLib.Assets;
@@ -53,7 +53,7 @@ assetManager.LoadAssets();
 assetManager.ExtractTo("./exported");
 ```
 
-Register DLC archives after the base archives. Use `LoadAsset(path)` to load an individual asset.
+To read installed DLC archives, register them after the base archives. Use `LoadAsset(path)` to load an individual asset.
 
 ### Metadata
 
@@ -71,15 +71,15 @@ config.Write("config_new.g");
 
 Renaming an index entry does not change references inside resource files.
 
-### Source restoration and compilation
+### Exporting and compiling editable files
 
-Restore sources:
+Create editable files from game assets and indexes:
 
 ```cs
 new ProjectReconstructor(assetManager).SaveTo("./restored");
 ```
 
-Sources are saved in `game/asset`.
+Files are saved in `game/asset`. Original project settings and editing information absent from the shipped game cannot be recovered.
 
 Compile edited sources into archives:
 
@@ -91,7 +91,7 @@ var resources = compiler.Compile("script/example.sq", "./edited/example.sq");
 compiler.SaveTo("./compiled", resources);
 ```
 
-Use `CompileProject()` for an entire restored tree. Keep `.eastward-project.json` in the project root; it contains the path mappings needed for recompilation. Write the result to a new directory.
+Use `CompileProject()` for an entire exported file tree. Keep `.eastward-project.json` in the project root; it contains the path mappings needed for recompilation. Write the result to a new directory.
 
 ### ModPackage
 
@@ -108,7 +108,7 @@ Use `Read()` and `Validate()` to check the package and original resources. `Appl
 
 ## LuaJIT decompiler
 
-Connect a decompiler when extracting Lua source:
+Connect a decompiler to convert LuaJIT bytecode to Lua code. The result may differ from the original source:
 
 ```cs
 using var decompiler = new NativeLuaDecompiler("/path/to/native-library");

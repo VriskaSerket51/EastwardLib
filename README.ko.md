@@ -2,7 +2,7 @@
 
 [English](README.md) | 한국어
 
-`EastwardLib.dll`을 사용해 Eastward 에셋과 GArchive를 다룰 수 있습니다.
+Eastward 에셋과 GArchive를 다루는 비공식 .NET 라이브러리입니다.
 
 CLI 도구는 [EastwardPacker](https://github.com/VriskaSerket51/EastwardPacker)를 참고하세요.
 
@@ -37,7 +37,7 @@ g.ExtractTo("./locale_extracted");
 
 ### AssetManager
 
-인덱스에 있는 에셋을 원래 이름으로 추출할 수 있습니다.
+인덱스에 기록된 이름과 경로로 에셋을 추출할 수 있습니다.
 
 ```cs
 using EastwardLib.Assets;
@@ -53,7 +53,7 @@ assetManager.LoadAssets();
 assetManager.ExtractTo("./exported");
 ```
 
-DLC 아카이브는 기본 아카이브 뒤에 등록하세요. `LoadAsset(path)`로 에셋 하나만 읽을 수도 있습니다.
+설치된 DLC 아카이브를 함께 읽으려면 기본 아카이브 뒤에 등록하세요. `LoadAsset(path)`로 에셋 하나만 읽을 수도 있습니다.
 
 ### 메타데이터
 
@@ -71,15 +71,15 @@ config.Write("config_new.g");
 
 인덱스의 이름을 바꿔도 리소스 파일 안의 참조는 그대로 남습니다.
 
-### 소스 복원, 컴파일
+### 편집용 파일 내보내기와 컴파일
 
-소스를 복원하는 예제입니다.
+게임의 에셋과 인덱스에서 편집용 파일을 만드는 예제입니다.
 
 ```cs
 new ProjectReconstructor(assetManager).SaveTo("./restored");
 ```
 
-소스는 `game/asset`에 저장됩니다.
+파일은 `game/asset`에 저장됩니다. 배포본에 없는 원본 프로젝트 설정과 편집 정보는 복원하지 못합니다.
 
 수정한 소스를 아카이브에 반영하는 예제입니다.
 
@@ -91,7 +91,7 @@ var resources = compiler.Compile("script/example.sq", "./edited/example.sq");
 compiler.SaveTo("./compiled", resources);
 ```
 
-복원 트리 전체는 `CompileProject()`를 사용합니다. 프로젝트 루트의 `.eastward-project.json`은 재컴파일에 필요한 경로 매핑이므로 함께 보관하세요. 결과는 새 디렉터리에 출력합니다.
+내보낸 파일 트리 전체는 `CompileProject()`를 사용합니다. 프로젝트 루트의 `.eastward-project.json`은 재컴파일에 필요한 경로 매핑이므로 함께 보관하세요. 결과는 새 디렉터리에 출력합니다.
 
 ### ModPackage
 
@@ -108,7 +108,7 @@ mod.SaveTo("example.ewmod");
 
 ## LuaJIT 디컴파일러
 
-Lua 소스를 추출할 때는 디컴파일러를 연결하세요.
+LuaJIT 바이트코드를 Lua 코드로 변환할 때는 디컴파일러를 연결하세요. 결과는 원본 소스와 다를 수 있습니다.
 
 ```cs
 using var decompiler = new NativeLuaDecompiler("/path/to/native-library");
