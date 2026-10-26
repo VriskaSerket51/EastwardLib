@@ -672,6 +672,7 @@ public class AssetManager
 
     public void ExtractTo(string path, bool luaSource = false, Action<string, Exception>? onError = null)
     {
+        var exporter = new AssetExporter(path, luaSource);
         foreach (var (name, asset) in _assets.ToArray())
         {
             var parent = _assetIndex[name].Parent;
@@ -690,18 +691,9 @@ public class AssetManager
                 continue;
             }
 
-            var output = asset is WorkbookAsset ? Path.ChangeExtension(name, ".xlsx") : asset is MSpriteAsset ? Path.ChangeExtension(name, ".ase") : name;
             try
             {
-                var target = SafePath.ResolveWithin(path, output);
-                if (luaSource && asset is LuaAsset lua)
-                {
-                    lua.SaveSourceTo(target);
-                }
-                else
-                {
-                    asset.SaveTo(target);
-                }
+                exporter.SaveTo(asset, name);
             }
             catch (Exception error)
             {

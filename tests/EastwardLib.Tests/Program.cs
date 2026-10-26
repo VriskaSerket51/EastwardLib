@@ -24,6 +24,8 @@ var tests = new (string Name, Action Run)[]
     ("Project paths, reference boundaries and embedded prototypes", ProjectReferences),
     ("BIFF8 Unicode strings and source animation tags", SourcePackages),
     ("Source project packages and original references", SourceProject),
+    ("Decoded extraction formats, nested packages and output collisions", DecodedExtraction),
+    ("Source reconstruction keeps indexed image formats", SourceImagePaths),
     ("Extraction containment", Paths),
     ("Shared output paths, concurrent writes, PNG, archives and locale encoding", Output),
     ("Lossless metadata editing, validation, relationships and cache invalidation", Metadata),
@@ -746,6 +748,126 @@ static void VirtualAssets()
     }
     manager.RegisterLoader("msprite", _ => new TextAsset("override"));
     Check(manager.LoadAsset("hero.ase") is TextAsset, "Loader cache not invalidated");
+}
+
+static void DecodedExtraction()
+{
+    var pixel = new RgbaImage(1, 1, [1, 2, 3, 255]);
+    var fixtures = new Dictionary<string, Asset>(StringComparer.Ordinal)
+    {
+        ["image.hmg"] = new HmgAsset(pixel),
+        ["photo.jpg"] = new HmgAsset(pixel),
+        ["flat.PSD"] = new HmgAsset(pixel),
+        ["definition.proto"] = new JsonAsset(new JsonObject { ["value"] = 1 }),
+        ["story.ml"] = new GraphAsset("story_graph", "{}"),
+        ["fsm.ml"] = new GraphAsset("fsm_scheme", "return {}"),
+        ["dialogue.bin"] = new SQScriptAsset(new JsonObject { ["children"] = new JsonArray() }),
+        ["table.data"] = new CsvAsset(JsonNode.Parse("[[\"value\",1]]"), "table.csv"),
+        ["book.xls"] = new WorkbookAsset(new JsonObject(), new JsonObject()),
+        ["atlas"] = new AtlasAsset(new Dictionary<string, Asset>
+        {
+            ["atlas.json"] = new TextAsset("{\"atlases\":[{\"name\":\"page.png\"}],\"items\":[{\"name\":\"part.psd\",\"rect\":[0,0,1,1],\"atlas\":0}]}"),
+            ["page.png"] = new HmgAsset(pixel)
+        }),
+        ["packed.bin"] = Asset.Create<PackedAsset>(MessagePackSerializer.ConvertFromJson("{\"ok\":true}")),
+        ["script.lua"] = new LuaAsset([0x1b, 0x4c, 0x4a, 2], _ => "return 1"),
+        ["plain.script"] = new LuaAsset("return 2"u8.ToArray()),
+        ["layers.psd"] = new TexturePackAsset(new Dictionary<string, RgbaImage> { ["Layer"] = pixel }),
+        ["nested.pack"] = new PackageAsset(new Dictionary<string, Asset>
+        {
+            ["pixel.hmg"] = new HmgAsset(pixel),
+            ["config.packed"] = new JsonAsset(new JsonObject { ["nested"] = true }),
+            ["raw.bin"] = new BinaryAsset([1, 2, 3])
+        })
+    };
+    if (Environment.GetEnvironmentVariable("EASTWARD_TEST_DECODED") is string fixtureDirectory)
+    {
+        var archive = GArchive.Create("config");
+        archive["config/asset_index"] = "{\"image.psd\":{\"type\":\"texture\",\"objectFiles\":{\"pixmap\":\"config/pixel\"}},\"definition.proto\":{\"type\":\"proto\",\"objectFiles\":{\"def\":\"config/definition\"}}}"u8.ToArray();
+        archive["config/script_library"] = "{\"source\":{}}"u8.ToArray();
+        archive["config/texture_index"] = "{\"root\":\"1\",\"map\":{\"1\":{\"body\":{\"groups\":[]}}}}"u8.ToArray();
+        archive["config/pixel"] = new HmgAsset(pixel).Encode();
+        archive["config/definition"] = "{\"test\":true}"u8.ToArray();
+        archive.Write(Path.Combine(fixtureDirectory, "config.g"));
+    }
+    var index = new JsonObject();
+    foreach (var name in fixtures.Keys)
+    {
+        index.Add(name, new JsonObject { ["type"] = "test", ["objectFiles"] = new JsonObject() });
+    }
+    var manager = Manager(index.ToJsonString());
+    manager.RegisterLoader("test", info => fixtures[info.AssetName]);
+    foreach (var name in fixtures.Keys)
+    {
+        manager.LoadAsset(name);
+    }
+    var root = Path.Combine(Path.GetTempPath(), "EastwardLib-decoded-" + Guid.NewGuid());
+    try
+    {
+        manager.ExtractTo(root);
+        foreach (var name in new[] { "image.png", "photo.png", "flat.png", "nested.pack/pixel.png", "atlas/part.png" })
+        {
+            Check(File.ReadAllBytes(Path.Combine(root, name)).AsSpan().StartsWith(new byte[] { 137, 80, 78, 71 }), "Decoded image extension or signature differs: " + name);
+        }
+        Check(File.ReadAllBytes(Path.Combine(root, "layers.psd")).AsSpan().StartsWith("8BPS"u8), "Valid PSD package was renamed or written as PNG");
+        Check(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "definition.json")))!["value"]!.GetValue<int>() == 1, "JSON output extension differs");
+        Check(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "packed.json")))!["ok"]!.GetValue<bool>(), "Packed JSON output differs");
+        Check(File.Exists(Path.Combine(root, "story.json")) && File.Exists(Path.Combine(root, "fsm.lua")) && File.Exists(Path.Combine(root, "dialogue.sq")), "Graph or SQ output extension differs");
+        Check(File.ReadAllText(Path.Combine(root, "table.csv")) == "value,1", "CSV output extension differs");
+        using (var workbook = ZipFile.OpenRead(Path.Combine(root, "book.xlsx")))
+        {
+            Check(workbook.GetEntry("[Content_Types].xml") != null, "Workbook output is not OOXML");
+        }
+        Check(File.Exists(Path.Combine(root, "script.luac")) && File.ReadAllText(Path.Combine(root, "plain.lua")) == "return 2", "Lua output extension differs");
+        Check(File.ReadAllBytes(Path.Combine(root, "nested.pack/raw.bin")).SequenceEqual(new byte[] { 1, 2, 3 }), "Raw package bytes changed");
+        Check(!File.Exists(Path.Combine(root, "image.hmg")) && !File.Exists(Path.Combine(root, "flat.PSD")), "Decoded PNG kept a misleading extension");
+        var source = Path.Combine(root, "lua-source");
+        manager.ExtractTo(source, true);
+        Check(File.ReadAllText(Path.Combine(source, "script.lua")) == "return 1", "Lua source output differs");
+
+        var collision = Manager("{\"same.hmg\":{\"type\":\"test\"},\"same.png\":{\"type\":\"test\"},\"other.bin\":{\"type\":\"test\"}}");
+        collision.RegisterLoader("test", info => info.AssetName == "other.bin" ? new BinaryAsset([9]) : new HmgAsset(info.AssetName == "same.hmg" ? pixel : new RgbaImage(1, 1, [4, 5, 6, 255])));
+        foreach (var name in collision.Assets.Keys)
+        {
+            collision.LoadAsset(name);
+        }
+        var errors = new List<(string, Exception)>();
+        var output = Path.Combine(root, "collision");
+        collision.ExtractTo(output, false, (name, error) => errors.Add((name, error)));
+        Check(errors.Count == 1 && errors[0].Item1 == "same.png" && errors[0].Item2 is IOException, "Extension collision was not reported");
+        using var stream = File.OpenRead(Path.Combine(output, "same.png"));
+        Check(RgbaImage.Load(stream).Pixels.SequenceEqual(pixel.Pixels), "Extension collision silently overwrote pixels");
+        Check(File.Exists(Path.Combine(output, "other.bin")), "An output collision stopped independent assets");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, true);
+        }
+    }
+}
+
+static void SourceImagePaths()
+{
+    var manager = Manager("{\"original.psd\":{\"type\":\"texture\",\"filePath\":\"game/asset/original.psd\"},\"original.png\":{\"type\":\"texture\",\"filePath\":\"game/asset/original.png\"}}");
+    manager.RegisterLoader("texture", _ => new HmgAsset(new RgbaImage(1, 1, [1, 2, 3, 255])));
+    var root = Path.Combine(Path.GetTempPath(), "EastwardLib-source-images-" + Guid.NewGuid());
+    try
+    {
+        var report = new ProjectReconstructor(manager).SaveTo(root);
+        Check(report.Restored.Count == 2 && report.Unavailable.Count == 0, "Source image reconstruction coverage differs");
+        Check(File.ReadAllBytes(Path.Combine(root, "game/asset/original.psd")).AsSpan().StartsWith("8BPS"u8), "Source PSD format was changed by decoded export");
+        Check(File.ReadAllBytes(Path.Combine(root, "game/asset/original.png")).AsSpan().StartsWith(new byte[] { 137, 80, 78, 71 }), "Source PNG format was changed by decoded export");
+        Check(manager.Assets.ContainsKey("original.psd") && manager.Assets.ContainsKey("original.png"), "Decoded export renamed indexed assets");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, true);
+        }
+    }
 }
 
 static void Paths()

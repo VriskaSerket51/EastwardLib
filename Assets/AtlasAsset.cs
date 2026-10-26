@@ -35,6 +35,8 @@ public class AtlasAsset : PackageAsset
         }
     }
 
+    internal IReadOnlyDictionary<string, byte[]> Images => _images;
+
     public byte[] this[string name] => _images[name];
     public override void SaveTo(string path)
     {
