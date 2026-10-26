@@ -16,7 +16,7 @@
     ]
   },
   {
-    "package": "MessagePack/3.1.11",
+    "package": "MessagePack/3.1.12",
     "license": "MIT",
     "source": "https://github.com/MessagePack-CSharp/MessagePack-CSharp",
     "notices": [
@@ -24,7 +24,7 @@
     ]
   },
   {
-    "package": "MessagePack.Annotations/3.1.11",
+    "package": "MessagePack.Annotations/3.1.12",
     "license": "MIT",
     "source": "https://github.com/MessagePack-CSharp/MessagePack-CSharp",
     "notices": [
@@ -32,7 +32,7 @@
     ]
   },
   {
-    "package": "MessagePackAnalyzer/3.1.11",
+    "package": "MessagePackAnalyzer/3.1.12",
     "license": "MIT",
     "source": "https://github.com/MessagePack-CSharp/MessagePack-CSharp",
     "notices": [
